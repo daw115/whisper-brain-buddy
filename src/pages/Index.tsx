@@ -22,24 +22,33 @@ export default function Index() {
     await recorder.startRecording();
   };
 
+  const durationAtStop = useRef(0);
+
   // Override stop to also save meeting
   const handleStopRecording = () => {
-    const duration = recorder.recordingTime;
+    durationAtStop.current = recorder.recordingTime;
     recorder.stopRecording();
-
-    // Create meeting entry
-    const mins = Math.floor(duration / 60);
-    const secs = duration % 60;
-    const durationStr = `${mins}:${secs.toString().padStart(2, "0")}`;
-    const now = new Date();
-    const title = `Meeting ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-
-    createMeeting.mutate({
-      title,
-      duration: durationStr,
-      recording_filename: `meeting_${now.toISOString().slice(0, 10)}_${now.toTimeString().slice(0, 8).replace(/:/g, "-")}.webm`,
-    });
   };
+
+  // When upload completes, create meeting entry with recording info
+  useEffect(() => {
+    if (recorder.lastRecording && !recorder.isUploading) {
+      const duration = durationAtStop.current;
+      const mins = Math.floor(duration / 60);
+      const secs = duration % 60;
+      const durationStr = `${mins}:${secs.toString().padStart(2, "0")}`;
+      const now = new Date();
+      const title = `Meeting ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+
+      createMeeting.mutate({
+        title,
+        duration: durationStr,
+        recording_filename: recorder.lastRecording.filename,
+        recording_size_bytes: recorder.lastRecording.blob.size,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.lastRecording, recorder.isUploading]);
 
   if (authLoading) {
     return (
