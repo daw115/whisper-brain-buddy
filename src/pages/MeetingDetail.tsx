@@ -100,7 +100,35 @@ export default function MeetingDetail() {
           {meeting.recording_filename && (
             <>
               <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mt-6 mb-3">Recording</h2>
-              <p className="text-xs font-mono-data text-muted-foreground">{meeting.recording_filename}</p>
+              {showPlayer && recordingUrl ? (
+                <video
+                  src={recordingUrl}
+                  controls
+                  autoPlay
+                  className="w-full rounded-md border border-border bg-black"
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  {recordingUrl && (
+                    <>
+                      <button
+                        onClick={() => setShowPlayer(true)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                      >
+                        <Play className="w-3.5 h-3.5" /> Play
+                      </button>
+                      <a
+                        href={recordingUrl}
+                        download={meeting.recording_filename}
+                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Download
+                      </a>
+                    </>
+                  )}
+                </div>
+              )}
+              <p className="text-xs font-mono-data text-muted-foreground mt-2">{meeting.recording_filename}</p>
               {meeting.recording_size_bytes && (
                 <p className="text-xs font-mono-data text-muted-foreground/60">
                   {(meeting.recording_size_bytes / (1024 * 1024)).toFixed(1)} MB
