@@ -10,6 +10,21 @@ export default function MeetingDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: meeting, isLoading } = useMeeting(id);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [showPlayer, setShowPlayer] = useState(false);
+
+  useEffect(() => {
+    if (!meeting?.recording_filename) return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const path = `${user.id}/${meeting.recording_filename}`;
+      const { data } = await supabase.storage
+        .from("recordings")
+        .createSignedUrl(path, 60 * 60); // 1 hour
+      if (data?.signedUrl) setRecordingUrl(data.signedUrl);
+    })();
+  }, [meeting?.recording_filename]);
 
   if (isLoading) {
     return (
