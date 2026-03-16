@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback, useRef } from "react";
 import { Routes, Route } from "react-router-dom";
 import AppSidebar from "@/components/AppSidebar";
 import RecordingHUD from "@/components/RecordingHUD";
@@ -8,43 +7,18 @@ import ChatPage from "@/pages/ChatPage";
 import ActionsPage from "@/pages/ActionsPage";
 import SearchPage from "@/pages/SearchPage";
 import SettingsPage from "@/pages/SettingsPage";
+import { useRecorder } from "@/hooks/use-recorder";
 
 export default function Index() {
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
-      // In a real app, MediaRecorder would capture here
-      stream.getTracks().forEach((track) => {
-        track.onended = () => stopRecording();
-      });
-      setIsRecording(true);
-      setRecordingTime(0);
-    } catch {
-      // User cancelled screen picker
-    }
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    setIsRecording(false);
-    setRecordingTime(0);
-    if (timerRef.current) clearInterval(timerRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (isRecording) {
-      timerRef.current = setInterval(() => setRecordingTime((t) => t + 1), 1000);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isRecording]);
+  const {
+    isRecording,
+    isPaused,
+    recordingTime,
+    startRecording,
+    stopRecording,
+    pauseRecording,
+    resumeRecording,
+  } = useRecorder();
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -61,9 +35,11 @@ export default function Index() {
       </main>
       <RecordingHUD
         isRecording={isRecording}
+        isPaused={isPaused}
         time={recordingTime}
-        onStart={startRecording}
         onStop={stopRecording}
+        onPause={pauseRecording}
+        onResume={resumeRecording}
       />
     </div>
   );
