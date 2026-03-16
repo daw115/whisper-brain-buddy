@@ -8,24 +8,57 @@ import ActionsPage from "@/pages/ActionsPage";
 import SearchPage from "@/pages/SearchPage";
 import SettingsPage from "@/pages/SettingsPage";
 import { useRecorder } from "@/hooks/use-recorder";
+import { useCreateMeeting } from "@/hooks/use-meetings";
+import { useAuth } from "@/hooks/use-auth";
+import AuthPage from "@/pages/AuthPage";
+import { Loader2 } from "lucide-react";
 
 export default function Index() {
-  const {
-    isRecording,
-    isPaused,
-    recordingTime,
-    startRecording,
-    stopRecording,
-    pauseRecording,
-    resumeRecording,
-  } = useRecorder();
+  const { user, loading: authLoading } = useAuth();
+  const recorder = useRecorder();
+  const createMeeting = useCreateMeeting();
+
+  const handleStartRecording = async () => {
+    await recorder.startRecording();
+  };
+
+  // Override stop to also save meeting
+  const handleStopRecording = () => {
+    const duration = recorder.recordingTime;
+    recorder.stopRecording();
+
+    // Create meeting entry
+    const mins = Math.floor(duration / 60);
+    const secs = duration % 60;
+    const durationStr = `${mins}:${secs.toString().padStart(2, "0")}`;
+    const now = new Date();
+    const title = `Meeting ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+
+    createMeeting.mutate({
+      title,
+      duration: durationStr,
+      recording_filename: `meeting_${now.toISOString().slice(0, 10)}_${now.toTimeString().slice(0, 8).replace(/:/g, "-")}.webm`,
+    });
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-muted-foreground animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage />;
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
-      <AppSidebar isRecording={isRecording} recordingTime={recordingTime} />
+      <AppSidebar isRecording={recorder.isRecording} recordingTime={recorder.recordingTime} />
       <main className="flex-1 min-h-screen overflow-y-auto">
         <Routes>
-          <Route index element={<Dashboard onStartRecording={startRecording} />} />
+          <Route index element={<Dashboard onStartRecording={handleStartRecording} />} />
           <Route path="meeting/:id" element={<MeetingDetail />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="actions" element={<ActionsPage />} />
@@ -34,12 +67,12 @@ export default function Index() {
         </Routes>
       </main>
       <RecordingHUD
-        isRecording={isRecording}
-        isPaused={isPaused}
-        time={recordingTime}
-        onStop={stopRecording}
-        onPause={pauseRecording}
-        onResume={resumeRecording}
+        isRecording={recorder.isRecording}
+        isPaused={recorder.isPaused}
+        time={recorder.recordingTime}
+        onStop={handleStopRecording}
+        onPause={recorder.pauseRecording}
+        onResume={recorder.resumeRecording}
       />
     </div>
   );

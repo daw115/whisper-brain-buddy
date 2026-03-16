@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -6,9 +5,10 @@ import {
   MessageSquare,
   ListChecks,
   Settings,
-  Mic,
   Brain,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -32,10 +32,10 @@ function formatTime(seconds: number) {
 export default function AppSidebar({ isRecording, recordingTime }: AppSidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, signOut } = useAuth();
 
   return (
     <aside className="w-[280px] min-h-screen border-r border-border bg-sidebar flex flex-col">
-      {/* Logo */}
       <div className="h-16 flex items-center gap-3 px-6 border-b border-border">
         <Brain className="w-6 h-6 text-primary" />
         <span className="text-lg font-semibold tracking-tight text-sidebar-accent-foreground">
@@ -43,7 +43,6 @@ export default function AppSidebar({ isRecording, recordingTime }: AppSidebarPro
         </span>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 py-4 px-3 space-y-1">
         {navItems.map((item) => {
           const active = location.pathname === item.path;
@@ -64,7 +63,6 @@ export default function AppSidebar({ isRecording, recordingTime }: AppSidebarPro
         })}
       </nav>
 
-      {/* Recording Status */}
       {isRecording && (
         <div className="mx-3 mb-4 border border-recording/30 bg-recording/5 rounded-md p-3">
           <div className="flex items-center gap-2 mb-2">
@@ -79,13 +77,19 @@ export default function AppSidebar({ isRecording, recordingTime }: AppSidebarPro
         </div>
       )}
 
-      {/* Footer */}
       <div className="px-6 py-4 border-t border-border">
-        <p className="text-[11px] text-muted-foreground font-mono-data">
-          CEREBRO v0.1.0
-        </p>
+        {user && (
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] text-muted-foreground font-mono-data truncate max-w-[180px]">
+              {user.email}
+            </span>
+            <button onClick={signOut} className="text-muted-foreground hover:text-foreground transition-colors">
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         <p className="text-[11px] text-muted-foreground/60 font-mono-data">
-          Local · Private · Open Source
+          CEREBRO v0.1.0 · Local · Private
         </p>
       </div>
     </aside>
