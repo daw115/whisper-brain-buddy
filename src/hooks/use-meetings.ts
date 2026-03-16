@@ -52,7 +52,7 @@ export type DbParticipant = {
 export type MeetingWithRelations = DbMeeting & {
   action_items: DbActionItem[];
   decisions: DbDecision[];
-  transcript_lines: DbTranscriptLine[];
+  transcript_lines?: DbTranscriptLine[];
   meeting_participants: DbParticipant[];
 };
 
