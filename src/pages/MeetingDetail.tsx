@@ -1,6 +1,8 @@
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2 } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download } from "lucide-react";
 import { useMeeting } from "@/hooks/use-meetings";
+import { supabase } from "@/integrations/supabase/client";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 
@@ -8,6 +10,21 @@ export default function MeetingDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: meeting, isLoading } = useMeeting(id);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [showPlayer, setShowPlayer] = useState(false);
+
+  useEffect(() => {
+    if (!meeting?.recording_filename) return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const path = `${user.id}/${meeting.recording_filename}`;
+      const { data } = await supabase.storage
+        .from("recordings")
+        .createSignedUrl(path, 60 * 60); // 1 hour
+      if (data?.signedUrl) setRecordingUrl(data.signedUrl);
+    })();
+  }, [meeting?.recording_filename]);
 
   if (isLoading) {
     return (
@@ -83,7 +100,35 @@ export default function MeetingDetail() {
           {meeting.recording_filename && (
             <>
               <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mt-6 mb-3">Recording</h2>
-              <p className="text-xs font-mono-data text-muted-foreground">{meeting.recording_filename}</p>
+              {showPlayer && recordingUrl ? (
+                <video
+                  src={recordingUrl}
+                  controls
+                  autoPlay
+                  className="w-full rounded-md border border-border bg-black"
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  {recordingUrl && (
+                    <>
+                      <button
+                        onClick={() => setShowPlayer(true)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                      >
+                        <Play className="w-3.5 h-3.5" /> Play
+                      </button>
+                      <a
+                        href={recordingUrl}
+                        download={meeting.recording_filename}
+                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Download
+                      </a>
+                    </>
+                  )}
+                </div>
+              )}
+              <p className="text-xs font-mono-data text-muted-foreground mt-2">{meeting.recording_filename}</p>
               {meeting.recording_size_bytes && (
                 <p className="text-xs font-mono-data text-muted-foreground/60">
                   {(meeting.recording_size_bytes / (1024 * 1024)).toFixed(1)} MB
