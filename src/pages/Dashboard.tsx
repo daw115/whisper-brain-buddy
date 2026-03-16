@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Search, Mic, FileText, CheckSquare, Lightbulb } from "lucide-react";
+import { Search, Mic, FileText, CheckSquare, Lightbulb, Loader2 } from "lucide-react";
 import MeetingCard from "@/components/MeetingCard";
-import { mockMeetings } from "@/lib/mock-data";
+import { useMeetings } from "@/hooks/use-meetings";
 
 interface DashboardProps {
   onStartRecording: () => void;
@@ -9,22 +9,23 @@ interface DashboardProps {
 
 export default function Dashboard({ onStartRecording }: DashboardProps) {
   const [search, setSearch] = useState("");
+  const { data: meetings = [], isLoading } = useMeetings();
 
-  const filtered = mockMeetings.filter(
+  const filtered = meetings.filter(
     (m) =>
       m.title.toLowerCase().includes(search.toLowerCase()) ||
-      m.tags.some((t) => t.includes(search.toLowerCase()))
+      (m.tags || []).some((t) => t.includes(search.toLowerCase()))
   );
 
-  const totalTasks = mockMeetings.reduce((sum, m) => sum + (m.actionItems?.length || 0), 0);
-  const openTasks = mockMeetings.reduce(
-    (sum, m) => sum + (m.actionItems?.filter((a) => !a.completed).length || 0),
+  const totalTasks = meetings.reduce((sum, m) => sum + (m.action_items?.length || 0), 0);
+  const openTasks = meetings.reduce(
+    (sum, m) => sum + (m.action_items?.filter((a) => !a.completed).length || 0),
     0
   );
+  const totalDecisions = meetings.reduce((sum, m) => sum + (m.decisions?.length || 0), 0);
 
   return (
     <div className="p-8 max-w-6xl">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
@@ -41,13 +42,12 @@ export default function Dashboard({ onStartRecording }: DashboardProps) {
         </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-4 gap-px bg-border rounded-lg overflow-hidden mb-8">
         {[
-          { label: "Meetings", value: mockMeetings.length, icon: FileText },
+          { label: "Meetings", value: meetings.length, icon: FileText },
           { label: "Open Tasks", value: openTasks, icon: CheckSquare },
           { label: "Total Tasks", value: totalTasks, icon: CheckSquare },
-          { label: "Decisions", value: mockMeetings.reduce((s, m) => s + (m.decisions?.length || 0), 0), icon: Lightbulb },
+          { label: "Decisions", value: totalDecisions, icon: Lightbulb },
         ].map((stat) => (
           <div key={stat.label} className="bg-card p-5">
             <div className="flex items-center gap-2 mb-2">
@@ -63,7 +63,6 @@ export default function Dashboard({ onStartRecording }: DashboardProps) {
         ))}
       </div>
 
-      {/* Search */}
       <div className="relative mb-6">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <input
@@ -77,15 +76,23 @@ export default function Dashboard({ onStartRecording }: DashboardProps) {
         </span>
       </div>
 
-      {/* Meeting List */}
       <div className="space-y-2">
-        {filtered.map((meeting, i) => (
+        {isLoading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+          </div>
+        )}
+        {!isLoading && filtered.map((meeting, i) => (
           <MeetingCard key={meeting.id} meeting={meeting} index={i} />
         ))}
-        {filtered.length === 0 && (
-          <p className="text-sm text-muted-foreground text-center py-12">
-            No meetings found.
-          </p>
+        {!isLoading && filtered.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-sm text-muted-foreground">
+              {meetings.length === 0
+                ? "No meetings yet. Click 'New Recording' to capture your first meeting."
+                : "No meetings match your search."}
+            </p>
+          </div>
         )}
       </div>
     </div>

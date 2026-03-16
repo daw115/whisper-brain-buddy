@@ -1,18 +1,19 @@
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Loader2 } from "lucide-react";
 import MeetingCard from "@/components/MeetingCard";
-import { mockMeetings } from "@/lib/mock-data";
+import { useMeetings } from "@/hooks/use-meetings";
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
+  const { data: meetings = [], isLoading } = useMeetings();
 
   const results = query.trim()
-    ? mockMeetings.filter(
+    ? meetings.filter(
         (m) =>
           m.title.toLowerCase().includes(query.toLowerCase()) ||
-          m.tags.some((t) => t.includes(query.toLowerCase())) ||
+          (m.tags || []).some((t) => t.includes(query.toLowerCase())) ||
           m.summary?.toLowerCase().includes(query.toLowerCase()) ||
-          m.participants.some((p) => p.toLowerCase().includes(query.toLowerCase()))
+          (m.meeting_participants || []).some((p) => p.name.toLowerCase().includes(query.toLowerCase()))
       )
     : [];
 
