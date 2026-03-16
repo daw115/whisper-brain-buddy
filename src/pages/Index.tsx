@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import AppSidebar from "@/components/AppSidebar";
 import RecordingHUD from "@/components/RecordingHUD";

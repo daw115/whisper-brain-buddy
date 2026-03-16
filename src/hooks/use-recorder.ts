@@ -35,7 +35,7 @@ async function uploadToStorage(blob: Blob, filename: string): Promise<string | n
     return null;
   }
 
-  const { data: urlData } = supabase.storage
+  const { data: urlData } = await supabase.storage
     .from("recordings")
     .createSignedUrl(path, 60 * 60 * 24 * 365); // 1 year
 
