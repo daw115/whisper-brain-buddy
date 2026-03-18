@@ -27,6 +27,7 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
   const [convertProgress, setConvertProgress] = useState(0);
   const [transcribeProgress, setTranscribeProgress] = useState(0);
   const [mode, setMode] = useState<"offline" | "online">("offline");
+  const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const ffmpegRef = useRef<any>(null);
 
   async function convertToWav(): Promise<Float32Array> {
