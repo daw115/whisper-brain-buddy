@@ -45,6 +45,7 @@ export default function AudioExtractor({
   const [chunkMB, setChunkMB] = useState(20);
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [splitProgress, setSplitProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const ffmpegRef = useRef<any>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
