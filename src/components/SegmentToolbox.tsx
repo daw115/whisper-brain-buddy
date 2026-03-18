@@ -702,6 +702,14 @@ export default function SegmentToolbox({
               {phase === "splitting" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Scissors className="w-3.5 h-3.5" />}
               Podziel MP3 ({selectedAudio.size})
             </button>
+            <button
+              onClick={handleMergeTranscripts}
+              disabled={busy}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-border bg-card hover:bg-muted/50 text-foreground transition-colors disabled:opacity-50"
+            >
+              {phase === "merging" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />}
+              Scal transkrypty
+            </button>
           </div>
 
           {/* Chunk size for splitting */}
