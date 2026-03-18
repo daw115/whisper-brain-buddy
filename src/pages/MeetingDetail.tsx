@@ -120,6 +120,22 @@ export default function MeetingDetail() {
         {tags.length > 0 && (
           <span className="flex items-center gap-1.5"><Tag className="w-3.5 h-3.5" />{tags.join(", ")}</span>
         )}
+        <span className="flex items-center gap-1.5">
+          <FolderOpen className="w-3.5 h-3.5" />
+          <select
+            value={meeting.category_id || ""}
+            onChange={(e) => updateCategory(e.target.value || null)}
+            className="bg-transparent border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-primary/50 cursor-pointer"
+          >
+            <option value="">Bez kategorii</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+          {meeting.categories && (
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meeting.categories.color }} />
+          )}
+        </span>
       </div>
 
       <div className="grid grid-cols-12 gap-px bg-border rounded-lg overflow-hidden">
