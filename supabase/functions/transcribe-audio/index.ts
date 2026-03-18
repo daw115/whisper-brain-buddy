@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64, mimeType = "audio/mpeg", language = "pl", frames = [] } = await req.json();
+    const { audioBase64, mimeType = "audio/mpeg", language = "pl", frames = [], segmentOffsetSeconds = 0 } = await req.json();
 
     if (!audioBase64) {
       return new Response(JSON.stringify({ error: "audioBase64 is required" }), {
