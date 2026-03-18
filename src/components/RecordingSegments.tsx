@@ -136,6 +136,7 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
+  if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
         <Loader2 className="w-3 h-3 animate-spin" />
