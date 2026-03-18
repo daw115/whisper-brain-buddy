@@ -305,6 +305,12 @@ export default function MeetingDetail() {
             />
           </div>
 
+          {/* Unique Slides (selected from frames) */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Slajdy</h2>
+            <UniqueSlides meetingId={meeting.id} analyses={analyses || []} />
+          </div>
+
           {/* Gemini Analysis */}
           <div className="mt-6 pt-4 border-t border-border">
             <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Analiza Gemini</h2>
