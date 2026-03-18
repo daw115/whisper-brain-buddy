@@ -16,7 +16,7 @@ interface FrameInfo {
   timestamp?: string;
 }
 
-export default function AnalysisPromptGenerator({ meeting, recordingUrl }: Props) {
+export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesVersion = 0 }: Props) {
   const [frames, setFrames] = useState<FrameInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
