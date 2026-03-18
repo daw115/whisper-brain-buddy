@@ -11,6 +11,7 @@ interface Props {
 
 export default function FrameRegenerator({ recordingUrl, recordingFilename, onComplete }: Props) {
   const [interval, setInterval] = useState(30);
+  const [customInterval, setCustomInterval] = useState("");
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState("");
 
@@ -55,22 +56,43 @@ export default function FrameRegenerator({ recordingUrl, recordingFilename, onCo
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Settings2 className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <span className="text-xs text-muted-foreground">Interwał:</span>
-        <select
-          value={interval}
-          onChange={(e) => setInterval(Number(e.target.value))}
-          disabled={generating}
-          className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-        >
-          <option value={10}>co 10s</option>
-          <option value={15}>co 15s</option>
-          <option value={20}>co 20s</option>
-          <option value={30}>co 30s</option>
-          <option value={45}>co 45s</option>
-          <option value={60}>co 60s</option>
-        </select>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            min={1}
+            max={300}
+            value={customInterval || interval}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCustomInterval(val);
+              const num = parseInt(val);
+              if (num >= 1 && num <= 300) setInterval(num);
+            }}
+            disabled={generating}
+            className="w-16 text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground text-center"
+            placeholder="30"
+          />
+          <span className="text-[10px] text-muted-foreground">sek</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {[5, 10, 15, 30, 60].map((v) => (
+          <button
+            key={v}
+            onClick={() => { setInterval(v); setCustomInterval(String(v)); }}
+            disabled={generating}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              interval === v
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {v}s
+          </button>
+        ))}
       </div>
 
       <button
