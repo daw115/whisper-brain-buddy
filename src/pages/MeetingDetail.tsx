@@ -12,6 +12,7 @@ import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
 import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
+import RecordingSplitter from "@/components/RecordingSplitter";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
