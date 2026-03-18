@@ -163,21 +163,24 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
     setTranscribePhase("converting");
 
     try {
-      toast.loading(`Transkrypcja segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+      toast.loading(`Pobieranie segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
-      const { fetchFile } = await import("@ffmpeg/util");
-      const ffmpeg = await getFFmpeg();
+      // Download segment
+      const response = await fetch(seg.signedUrl);
+      if (!response.ok) throw new Error(`Błąd pobierania: ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      
+      toast.loading(`Dekodowanie audio segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
-      const videoData = await fetchFile(seg.signedUrl);
-      await ffmpeg.writeFile("tr_input.webm", videoData);
-
-      await ffmpeg.exec(["-i", "tr_input.webm", "-vn", "-ar", "16000", "-ac", "1", "-f", "f32le", "tr_output.pcm"]);
-
-      const pcmData = await ffmpeg.readFile("tr_output.pcm") as Uint8Array;
-      await ffmpeg.deleteFile("tr_input.webm");
-      await ffmpeg.deleteFile("tr_output.pcm");
-
-      const audioData = new Float32Array(pcmData.buffer);
+      // Use Web Audio API to decode and resample to 16kHz mono
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+      
+      // Get mono channel data (already resampled to 16kHz by AudioContext)
+      const audioData = decoded.getChannelData(0);
+      audioCtx.close();
+      
+      console.log(`Segment #${idx + 1}: ${(audioData.length / 16000).toFixed(0)}s, ${decoded.sampleRate}Hz`);
 
       setTranscribePhase("loading-model");
       toast.loading(`Ładowanie Whisper…`, { id: `trans-${idx}` });
