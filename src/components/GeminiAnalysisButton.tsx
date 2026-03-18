@@ -11,6 +11,9 @@ interface Props {
   onComplete?: (analysis: any) => void;
 }
 
+// Module-level cache: keyed by "filename:framesVersion"
+const frameCountCache = new Map<string, { total: number; unique: number }>();
+
 export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFilename, framesVersion = 0, onComplete }: Props) {
   const [analyzing, setAnalyzing] = useState(false);
   const [done, setDone] = useState(false);
@@ -20,7 +23,13 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
 
   useEffect(() => {
     if (hasFrames && recordingFilename) {
-      countUniqueFrames();
+      const cacheKey = `${recordingFilename}:${framesVersion}`;
+      const cached = frameCountCache.get(cacheKey);
+      if (cached) {
+        setFrameCounts(cached);
+        return;
+      }
+      countUniqueFrames(cacheKey);
     }
   }, [hasFrames, recordingFilename, framesVersion]);
 
