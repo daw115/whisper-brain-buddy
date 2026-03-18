@@ -75,12 +75,12 @@ serve(async (req) => {
   }
 
   try {
-    const { messages } = await req.json();
+    const { messages, meetingId } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const authHeader = req.headers.get("Authorization") || "";
-    const meetingContext = await buildMeetingContext(authHeader);
+    const meetingContext = await buildMeetingContext(authHeader, meetingId);
 
     const systemPrompt = `You are Cerebro, an AI meeting intelligence assistant. You have access to the user's real meeting data below.
 Answer questions based on this data. Cite meeting titles and dates when possible. If you can't find relevant info, say so.
