@@ -6,6 +6,7 @@ interface RecordingHUDProps {
   time: number;
   liveTranscript?: string;
   segmentCount?: number;
+  currentSizeMB?: number;
   onStop: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -24,6 +25,7 @@ export default function RecordingHUD({
   time,
   liveTranscript,
   segmentCount = 0,
+  currentSizeMB = 0,
   onStop,
   onPause,
   onResume,
@@ -47,13 +49,13 @@ export default function RecordingHUD({
           <span className="text-[10px] uppercase text-amber-400 font-mono-data tracking-wider">Paused</span>
         ) : null}
 
-        {/* Transcript indicator */}
-        {segmentCount > 0 && (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono-data">
-            <Mic className="w-3 h-3" />
-            {segmentCount}
-          </span>
-        )}
+        {/* Size & segment indicator */}
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono-data">
+          {currentSizeMB > 0 && <span>{currentSizeMB} MB</span>}
+          {segmentCount > 0 && (
+            <span className="text-primary/70">• cz.{segmentCount}</span>
+          )}
+        </span>
 
         <div className="flex items-center gap-1.5 ml-1">
           {isPaused ? (
