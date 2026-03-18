@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64, mimeType = "audio/mpeg", language = "pl" } = await req.json();
+    const { audioBase64, mimeType = "audio/mpeg", language = "pl", frames = [] } = await req.json();
 
     if (!audioBase64) {
       return new Response(JSON.stringify({ error: "audioBase64 is required" }), {
@@ -20,6 +20,10 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // frames: optional array of { base64: string, timestamp: string }
+    const hasFrames = Array.isArray(frames) && frames.length > 0;
+    console.log(`Frames provided: ${hasFrames ? frames.length : 0}`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
