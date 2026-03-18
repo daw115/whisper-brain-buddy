@@ -101,7 +101,7 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
       toast.loading("Transkrypcja offline w toku…", { id: "transcribe" });
 
       const result = await transcriber(audioData, {
-        language: "polish",
+        language: language === "pl" ? "polish" : language === "en" ? "english" : language === "de" ? "german" : language === "fr" ? "french" : language === "es" ? "spanish" : language === "it" ? "italian" : language === "pt" ? "portuguese" : language === "uk" ? "ukrainian" : language === "ru" ? "russian" : language === "cs" ? "czech" : "polish",
         task: "transcribe",
         return_timestamps: true,
         chunk_length_s: 30,
