@@ -331,27 +331,27 @@ Poniżej klatki:`,
 
       const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz dane z tego samego spotkania:
 
-## ŹRÓDŁO 1: DIALOGI Z NAPISÓW (OCR z paska na dole ekranu — live captions)
+${audioTranscript ? `## ŹRÓDŁO 1 (BAZA): TRANSKRYPT AUDIO (Web Speech API / Whisper)
+${audioTranscript.slice(0, 20000)}` : "## ŹRÓDŁO 1: Brak transkryptu audio"}
+
+## ŹRÓDŁO 2: DIALOGI Z NAPISÓW (OCR z paska live captions na dole ekranu)
 ${captionSource.transcript || "Brak"}
 
-${audioTranscript ? `## ŹRÓDŁO 2: TRANSKRYPT AUDIO (Web Speech API / Whisper)
-${audioTranscript.slice(0, 15000)}` : "## ŹRÓDŁO 2: Brak transkryptu audio"}
-
-${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (OCR z prezentacji)
+${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (treść prezentacji odczytana z klatek)
 ${slideDescText}` : ""}
 
 ## ZADANIE
-Stwórz JEDNĄ zagregowaną transkrypcję chronologiczną:
+Stwórz zagregowaną transkrypcję w formie DIALOGÓW:
 
-1. **Dialogi** — użyj napisów OCR jako bazy (mają nazwy mówców)
-2. **Audio** — uzupełnij/popraw z transkryptu audio (jeśli jest)
-3. **Slajdy** — wstaw znaczniki 📊 w odpowiednich momentach wskazując jaki slajd był wyświetlany
-4. **Mówcy** — zidentyfikuj pełne imiona
-5. **Korekta** — popraw błędy OCR korzystając z kontekstu
+1. **Bazą jest transkrypt audio** (ŹRÓDŁO 1) — zachowaj jego strukturę dialogową
+2. **Korekta na podstawie OCR** — porównaj czasy z napisami (ŹRÓDŁO 2). Jeśli OCR pokazuje inny tekst niż audio w tym samym momencie, popraw błędy rozpoznawania mowy. Jeśli audio jest poprawne — NIE zmieniaj.
+3. **Mówcy** — uzupełnij nazwy mówców z live captions (OCR ma pełne imiona). Zamień "unknown"/"Mówca" na właściwe imię jeśli OCR je pokazuje.
+4. **Opisy slajdów** — wstaw opisy slajdów (ŹRÓDŁO 3) jako znaczniki 📊 w odpowiednich momentach chronologicznie MIĘDZY dialogami (nie jako obrazki, tylko tekst opisowy).
+5. **NIE dodawaj nic od siebie** — nie generuj nowych wypowiedzi, tylko koryguj istniejące.
 
-Format zagregowanej transkrypcji:
+Format:
 [MM:SS] Mówca: wypowiedź
-[MM:SS] 📊 SLAJD: "Tytuł slajdu" — krótki opis treści`;
+[MM:SS] 📊 SLAJD: "Tytuł" — opis treści slajdu`;
 
       const aggregateResult = await callAI(
         [{ type: "text", text: aggregatePrompt }],
