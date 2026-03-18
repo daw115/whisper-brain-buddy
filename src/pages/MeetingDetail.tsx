@@ -10,14 +10,10 @@ import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
-import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
-import RecordingSplitter from "@/components/RecordingSplitter";
-import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
-import TranscribeButton from "@/components/TranscribeButton";
-import AudioExtractor from "@/components/AudioExtractor";
 import RecordingPanel from "@/components/RecordingPanel";
+import SegmentToolbox from "@/components/SegmentToolbox";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
@@ -27,7 +23,7 @@ export default function MeetingDetail() {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [framesVersion, setFramesVersion] = useState(0);
-  const [segmentsVersion, setSegmentsVersion] = useState(0);
+  
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
   const updateMeeting = useUpdateMeeting();
@@ -271,26 +267,13 @@ export default function MeetingDetail() {
                 recordingSizeBytes={meeting.recording_size_bytes}
               />
 
-              {/* Audio extraction & splitting — works with segments via RecordingSegments */}
-              {recordingUrl && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <AudioExtractor
-                    recordingUrl={recordingUrl}
-                    recordingFilename={meeting.recording_filename}
-                    recordingSizeBytes={meeting.recording_size_bytes}
-                    meetingId={meeting.id}
-                    framesVersion={framesVersion}
-                    onTranscriptGenerated={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
-                  />
-                </div>
-              )}
-
-              {/* Segments viewer (batch processing: frames + transcription per segment) */}
+              {/* Segment Toolbox: MP3 extraction, splitting, transcription, frames */}
               <div className="mt-3 pt-3 border-t border-border">
-                <RecordingSegments
-                  key={segmentsVersion}
+                <SegmentToolbox
                   recordingFilename={meeting.recording_filename}
+                  recordingSizeBytes={meeting.recording_size_bytes}
                   meetingId={meeting.id}
+                  framesVersion={framesVersion}
                   onFramesGenerated={() => setFramesVersion((v) => v + 1)}
                   onTranscriptGenerated={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
                 />
