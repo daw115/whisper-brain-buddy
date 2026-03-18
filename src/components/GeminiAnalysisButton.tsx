@@ -98,7 +98,9 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
         } catch { /* skip */ }
       }
 
-      setFrameCounts({ total: allFiles.length, unique: uniqueCount });
+      const result = { total: allFiles.length, unique: uniqueCount };
+      frameCountCache.set(cacheKey, result);
+      setFrameCounts(result);
     } catch (err) {
       console.error("Count frames error:", err);
     } finally {
