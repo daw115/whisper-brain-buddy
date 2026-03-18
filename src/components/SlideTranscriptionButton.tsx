@@ -62,6 +62,42 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
   const [error, setError] = useState<string | null>(null);
   const [completedSteps, setCompletedSteps] = useState<Record<string, any>>({});
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  // Track resumable offsets from DB
+  const [resumeInfo, setResumeInfo] = useState<Record<string, { next_offset: number; label: string }>>({});
+
+  // Load existing partial results on mount to detect resumable state
+  const loadExistingProgress = useCallback(async () => {
+    const sources = ["captions-ocr", "slide-descriptions"];
+    const { data } = await (supabase as any)
+      .from("meeting_analyses")
+      .select("source, analysis_json")
+      .eq("meeting_id", meetingId)
+      .in("source", sources)
+      .order("created_at", { ascending: false });
+
+    if (!data) return;
+    const newResume: Record<string, { next_offset: number; label: string }> = {};
+    for (const row of data) {
+      const json = row.analysis_json;
+      if (json?.has_more && json?.next_offset != null) {
+        if (row.source === "captions-ocr") {
+          newResume["ocr-captions"] = {
+            next_offset: json.next_offset,
+            label: `${json.processed_frames}/${json.frames_total}`,
+          };
+        }
+        if (row.source === "slide-descriptions") {
+          newResume["describe-slides"] = {
+            next_offset: json.next_offset,
+            label: `${json.processed_slides}/${json.slides_total}`,
+          };
+        }
+      }
+    }
+    setResumeInfo(newResume);
+  }, [meetingId]);
+
+  useEffect(() => { loadExistingProgress(); }, [loadExistingProgress]);
 
   // Step 3: Client-side frame deduplication
   async function runLocalDedup() {
