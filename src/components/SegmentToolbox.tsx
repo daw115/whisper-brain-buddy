@@ -674,11 +674,11 @@ export default function SegmentToolbox({
             <span>sek</span>
           </div>
           <div className="flex items-center gap-2">
-            <span>Max segment:</span>
+            <span>Max MP3:</span>
             <div className="flex gap-1">
-              {[25, 50, 100, 200].map(v => (
-                <button key={v} onClick={() => setMaxSegmentMB(v)} disabled={busy}
-                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${maxSegmentMB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+              {[5, 10, 20].map(v => (
+                <button key={v} onClick={() => setMaxMp3MB(v)} disabled={busy}
+                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${maxMp3MB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
                 >{v} MB</button>
               ))}
             </div>
