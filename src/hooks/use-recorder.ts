@@ -87,6 +87,27 @@ export function useRecorder(): RecordingState {
     isSplittingRef.current = false;
   }, []);
 
+  const extractFramesFromSegment = useCallback(async (blob: Blob, filename: string) => {
+    const toastId = `frames-${filename}`;
+    try {
+      toast.loading(`Klatki z ${filename}…`, { id: toastId });
+      const frames = await extractFrames(blob, 30, 30);
+      if (frames.length > 0) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const segStem = filename.replace(/\.[^.]+$/, "");
+          await uploadFrames(supabase, user.id, segStem, frames);
+          toast.success(`${frames.length} klatek z ${filename}`, { id: toastId, duration: 3000 });
+          return;
+        }
+      }
+      toast.dismiss(toastId);
+    } catch (err) {
+      console.error("Frame extraction error:", err);
+      toast.dismiss(toastId);
+    }
+  }, []);
+
   const uploadSegment = useCallback(async (blob: Blob, filename: string) => {
     const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
     toast.loading(`Przesyłanie segmentu (${sizeMB} MB)…`, { id: `upload-${filename}` });
@@ -99,6 +120,8 @@ export function useRecorder(): RecordingState {
         description: filename,
         duration: 4000,
       });
+      // Extract frames in background (don't await — let it run parallel)
+      extractFramesFromSegment(blob, filename);
       return { filename, signedUrl };
     } else {
       // Fallback: download locally
@@ -116,7 +139,7 @@ export function useRecorder(): RecordingState {
       });
       return { filename, signedUrl: null };
     }
-  }, []);
+  }, [extractFramesFromSegment]);
 
   const saveCurrentSegment = useCallback(async () => {
     const chunks = chunksRef.current;
@@ -213,26 +236,7 @@ export function useRecorder(): RecordingState {
         setLastRecording({ blob, filename: meetingFilename, url: signedUrl });
 
         // Extract frames in background
-        toast.loading("Wyodrębnianie klatek…", { id: "frames" });
-        try {
-          const frames = await extractFrames(blob, 30, 30);
-          if (frames.length > 0) {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              const stem = filename.replace(/\.[^.]+$/, "");
-              await uploadFrames(supabase, user.id, stem, frames);
-              toast.success(`${frames.length} klatek przechwyconych`, {
-                id: "frames",
-                duration: 4000,
-              });
-            }
-          } else {
-            toast.dismiss("frames");
-          }
-        } catch (err) {
-          console.error("Frame extraction error:", err);
-          toast.dismiss("frames");
-        }
+        extractFramesFromSegment(blob, filename);
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
