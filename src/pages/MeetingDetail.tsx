@@ -10,14 +10,10 @@ import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
-import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
-import RecordingSplitter from "@/components/RecordingSplitter";
-import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
-import TranscribeButton from "@/components/TranscribeButton";
-import AudioExtractor from "@/components/AudioExtractor";
 import RecordingPanel from "@/components/RecordingPanel";
+import SegmentToolbox from "@/components/SegmentToolbox";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
