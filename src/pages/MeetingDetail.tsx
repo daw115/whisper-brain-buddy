@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain, FolderOpen } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Brain, FolderOpen } from "lucide-react";
 import { useMeeting, useCategories } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
