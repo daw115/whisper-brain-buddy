@@ -321,7 +321,26 @@ export default function MeetingDetail() {
 
         {/* Center: Transcript */}
         <div className="col-span-5 bg-card p-5 border-l border-r border-border">
-          <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-4">Transcript</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">Transcript</h2>
+            {meeting.transcript_lines && meeting.transcript_lines.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`Usunąć ${meeting.transcript_lines.length} linii transkryptu?`)) return;
+                  const { error } = await supabase.from("transcript_lines").delete().eq("meeting_id", meeting.id);
+                  if (error) {
+                    toast.error("Błąd usuwania: " + error.message);
+                  } else {
+                    toast.success("Transkrypt wyczyszczony");
+                    queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+                  }
+                }}
+                className="text-[10px] text-destructive hover:text-destructive/80 transition-colors"
+              >
+                Wyczyść
+              </button>
+            )}
+          </div>
           {meeting.transcript_lines && meeting.transcript_lines.length > 0 ? (
             <TranscriptView lines={meeting.transcript_lines} />
           ) : (
