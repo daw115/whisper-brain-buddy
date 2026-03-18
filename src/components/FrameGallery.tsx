@@ -37,29 +37,37 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
       // List all frame folders matching this recording stem and its parts
       const prefixes = [stem];
       // Discover part directories directly from frames/ folder
-      const { data: frameDirs } = await supabase.storage
+      const { data: frameDirs, error: dirError } = await supabase.storage
         .from("recordings")
         .list(`${user.id}/frames`, { limit: 200, sortBy: { column: "name", order: "asc" } });
 
+      console.log("[FrameGallery] stem:", stem, "frameDirs:", frameDirs?.map(d => d.name), "dirError:", dirError);
+
       if (frameDirs) {
         for (const d of frameDirs) {
-          if (d.name.startsWith(stem + "_part")) {
+          if (d.name.startsWith(stem + "_part") || d.name.startsWith(stem + "_sub")) {
             prefixes.push(d.name);
           }
         }
       }
 
+      console.log("[FrameGallery] prefixes to scan:", prefixes);
+
       const allFrames: FrameFile[] = [];
 
       for (const prefix of prefixes) {
         const folderPath = `${user.id}/frames/${prefix}`;
-        const { data: files } = await supabase.storage
+        const { data: files, error: listError } = await supabase.storage
           .from("recordings")
           .list(`${user.id}/frames/${prefix}`, { limit: 200, sortBy: { column: "name", order: "asc" } });
+
+        console.log(`[FrameGallery] ${prefix}: ${files?.length ?? 0} files, error:`, listError);
 
         if (!files || files.length === 0) continue;
 
         const jpgFiles = files.filter((f) => f.name.endsWith(".jpg") || f.name.endsWith(".jpeg") || f.name.endsWith(".png"));
+
+        if (jpgFiles.length === 0) continue;
 
         // Batch signed URLs
         const paths = jpgFiles.map((f) => `${folderPath}/${f.name}`);
@@ -83,6 +91,7 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
         }
       }
 
+      console.log("[FrameGallery] total frames found:", allFrames.length);
       // Sort by path (groups by segment) then timestamp
       allFrames.sort((a, b) => a.path.localeCompare(b.path));
       setFrames(allFrames);
