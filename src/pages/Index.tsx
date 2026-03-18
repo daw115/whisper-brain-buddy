@@ -132,7 +132,8 @@ export default function Index() {
         isPaused={recorder.isPaused}
         time={recorder.recordingTime}
         liveTranscript={speech.liveText}
-        segmentCount={speech.segments.length}
+        segmentCount={recorder.segmentCount}
+        currentSizeMB={recorder.currentSizeMB}
         onStop={handleStopRecording}
         onPause={handlePause}
         onResume={handleResume}
