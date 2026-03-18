@@ -189,12 +189,23 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
       }
 
       setTranscribePhase("loading-model");
-      toast.loading(`Ładowanie Whisper…`, { id: `trans-${idx}` });
+      toast.loading(`Ładowanie Whisper (~50MB, przeglądarka może się zawiesić na chwilę)…`, { id: `trans-${idx}` });
 
       const { pipeline } = await import("@huggingface/transformers");
+
+      // Try WebGPU first (non-blocking, faster), fallback to WASM
+      let device: "webgpu" | "wasm" = "wasm";
+      try {
+        if ((navigator as any).gpu) {
+          const adapter = await (navigator as any).gpu.requestAdapter();
+          if (adapter) device = "webgpu";
+        }
+      } catch {}
+      console.log(`Whisper using device: ${device}`);
+
       const transcriber = await pipeline("automatic-speech-recognition", "onnx-community/whisper-small", {
-        dtype: "q4",
-        device: "wasm",
+        dtype: device === "webgpu" ? "fp32" : "q4",
+        device,
       });
 
       setTranscribePhase("transcribing");
