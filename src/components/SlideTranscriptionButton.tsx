@@ -313,13 +313,18 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
     return "gotowe";
   }
 
+  // Steps to render as buttons (3, 4 only — step 5 is PDF upload, step 6 is aggregate)
+  const buttonSteps: ("crop-split" | "ocr-captions")[] = ["crop-split", "ocr-captions"];
+  const aggregateStep = "aggregate" as const;
+
   return (
     <div className="space-y-2">
       <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
         Pipeline OCR slajdów
       </p>
 
-      {(Object.keys(stepConfig) as Exclude<Step, "idle">[]).map((step) => {
+      {/* Steps 3-4: dedup + OCR */}
+      {buttonSteps.map((step) => {
         const config = stepConfig[step];
         const Icon = config.icon;
         const status = getStepStatus(step);
@@ -372,6 +377,102 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
         );
       })}
 
+      {/* Step 5: PDF upload */}
+      <PdfSlidesUploader
+        meetingId={meetingId}
+        recordingFilename={recordingFilename}
+        onComplete={(result) => {
+          setCompletedSteps(prev => ({ ...prev, "describe-slides": result }));
+          onComplete?.(result);
+        }}
+      />
+
+      {/* Step 5b: Describe slides (from PDF) */}
+      {(() => {
+        const step = "describe-slides";
+        const status = getStepStatus(step);
+        const isThisRunning = runningStep === step;
+        const resume = resumeInfo[step];
+        return (
+          <div className="space-y-0.5">
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => runStep(step)}
+                disabled={isRunning}
+                className="flex-1 justify-start gap-2 text-xs h-8"
+              >
+                {isThisRunning ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                ) : status ? (
+                  <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                ) : (
+                  <span className="w-3.5 h-3.5 flex-shrink-0 text-[10px] font-bold">AI</span>
+                )}
+                <span>5b. {isThisRunning ? "Opisuję slajdy…" : "Opisz slajdy (AI)"}</span>
+              </Button>
+              {resume && !isRunning && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => runStep(step, resume.next_offset)}
+                  className="gap-1 text-xs h-8 px-2"
+                  title={`Wznów od ${resume.label}`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Wznów ({resume.label})
+                </Button>
+              )}
+            </div>
+            {isThisRunning && batchProgress && (
+              <p className="text-[9px] text-muted-foreground pl-6 animate-pulse">⏳ {batchProgress}</p>
+            )}
+            {status && (
+              <p className="text-[9px] text-muted-foreground pl-6">✓ {status}</p>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Step 6: Aggregate */}
+      {(() => {
+        const config = stepConfig[aggregateStep];
+        const Icon = config.icon;
+        const status = getStepStatus(aggregateStep);
+        const isThisRunning = runningStep === aggregateStep;
+        return (
+          <div className="space-y-0.5">
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => runStep(aggregateStep)}
+                disabled={isRunning}
+                className="flex-1 justify-start gap-2 text-xs h-8"
+              >
+                {isThisRunning ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                ) : status ? (
+                  <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                ) : (
+                  <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                )}
+                <span>
+                  {config.stepNum}. {isThisRunning ? `${config.label}…` : config.label}
+                </span>
+              </Button>
+            </div>
+            {isThisRunning && batchProgress && (
+              <p className="text-[9px] text-muted-foreground pl-6 animate-pulse">⏳ {batchProgress}</p>
+            )}
+            {status && (
+              <p className="text-[9px] text-muted-foreground pl-6">✓ {status}</p>
+            )}
+          </div>
+        );
+      })()}
+
       {!hasFrames && (
         <p className="text-[10px] text-muted-foreground text-center">
           Najpierw wygeneruj klatki (kroki 1-2)
@@ -387,10 +488,11 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
 
       <div className="text-[9px] text-muted-foreground/70 text-center leading-relaxed">
         <p>
-          <strong>1-2)</strong> Klatki (powyżej) →{" "}
-          <strong>3)</strong> Deduplikuj (lokalnie) →{" "}
+          <strong>1-2)</strong> Klatki →{" "}
+          <strong>3)</strong> Deduplikuj →{" "}
           <strong>4)</strong> OCR napisów →{" "}
-          <strong>5)</strong> Opisz slajdy →{" "}
+          <strong>5)</strong> Wgraj PDF →{" "}
+          <strong>5b)</strong> Opisz slajdy (AI) →{" "}
           <strong>6)</strong> Agreguj
         </p>
       </div>
