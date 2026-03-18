@@ -146,85 +146,14 @@ serve(async (req) => {
       return allFiles;
     }
 
-    // Detect caption bar height by scanning from bottom for dark rows
-    function detectCaptionBarY(pixels: Uint8Array, width: number, height: number): number {
-      // Scan from bottom up, find where the dark region ends
-      // Dark row = average brightness < 50
-      const DARK_THRESHOLD = 50;
-      const MIN_BAR_HEIGHT = 40; // at least 40px
-      const MAX_BAR_HEIGHT = Math.floor(height * 0.25); // at most 25%
-
-      let darkEnd = 0; // how many rows from bottom are dark
-      for (let row = height - 1; row >= height - MAX_BAR_HEIGHT; row--) {
-        let sumBrightness = 0;
-        const sampleStep = Math.max(1, Math.floor(width / 50)); // sample ~50 pixels per row
-        let samples = 0;
-        for (let x = 0; x < width; x += sampleStep) {
-          const idx = (row * width + x) * 4;
-          const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-          sumBrightness += (r + g + b) / 3;
-          samples++;
-        }
-        const avg = sumBrightness / samples;
-        if (avg < DARK_THRESHOLD) {
-          darkEnd = height - row;
-        } else {
-          // Found a non-dark row, stop
-          break;
-        }
-      }
-
-      if (darkEnd < MIN_BAR_HEIGHT) {
-        // No caption bar detected, use a default ~15%
-        console.log(`No dark caption bar detected (darkEnd=${darkEnd}px), using 15% default`);
-        return Math.floor(height * 0.85);
-      }
-
-      // Add a small padding (10px) above the dark region
-      const captionTop = height - darkEnd - 10;
-      console.log(`Caption bar detected: starts at y=${captionTop} (bar height=${darkEnd + 10}px, image height=${height})`);
-      return Math.max(0, captionTop);
-    }
-
-    // Crop JPEG bytes → returns { slideJpeg, captionJpeg, width, height, captionBarY }
-    function cropFrame(jpegBytes: Uint8Array, captionBarY: number) {
-      const decoded = decodeJpeg(jpegBytes, { useTArray: true, formatAsRGBA: true });
-      const { width, height, data } = decoded;
-
-      // Slide = top portion (0 to captionBarY)
-      const slideH = captionBarY;
-      const slidePixels = new Uint8Array(width * slideH * 4);
-      for (let row = 0; row < slideH; row++) {
-        const srcOff = row * width * 4;
-        const dstOff = row * width * 4;
-        slidePixels.set(data.subarray(srcOff, srcOff + width * 4), dstOff);
-      }
-
-      // Caption = bottom portion (captionBarY to height)
-      const captionH = height - captionBarY;
-      const captionPixels = new Uint8Array(width * captionH * 4);
-      for (let row = 0; row < captionH; row++) {
-        const srcOff = (captionBarY + row) * width * 4;
-        const dstOff = row * width * 4;
-        captionPixels.set(data.subarray(srcOff, srcOff + width * 4), dstOff);
-      }
-
-      const slideJpeg = encodeJpeg({ data: slidePixels, width, height: slideH }, 80);
-      const captionJpeg = encodeJpeg({ data: captionPixels, width, height: captionH }, 80);
-
-      return {
-        slideJpeg: new Uint8Array(slideJpeg.data),
-        captionJpeg: new Uint8Array(captionJpeg.data),
-        width, height, slideH, captionH,
-      };
-    }
-
-    // Hash slide pixels for dedup (uses 4KB sample from slide jpeg)
-    function hashSlideBytes(jpegBytes: Uint8Array): string {
+    // Hash raw JPEG bytes for dedup (no decode needed)
+    function hashFrameBytes(jpegBytes: Uint8Array): string {
       let hash = 0;
-      const sample = jpegBytes.slice(200, 4200); // skip JPEG header, sample 4KB
-      for (let i = 0; i < sample.length; i += 2) {
-        hash = ((hash << 5) - hash + sample[i]) | 0;
+      // Sample bytes across the image, skip header
+      const start = Math.min(500, jpegBytes.length);
+      const end = Math.min(jpegBytes.length, 8000);
+      for (let i = start; i < end; i += 3) {
+        hash = ((hash << 5) - hash + jpegBytes[i]) | 0;
       }
       return hash.toString(36);
     }
