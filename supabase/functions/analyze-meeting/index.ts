@@ -143,56 +143,52 @@ serve(async (req) => {
 
     console.log(`Analysis input: transcript=${hasTranscript} (${sorted.length} lines, ${transcriptText.length} chars), slides=${hasSlides} (${frames.length})`);
 
-    // 4. Build multimodal content with improved prompt
+    // 4. Build multimodal content — integrated chronological analysis
     const contentParts: any[] = [];
-    
-    let contextDescription = "";
-    if (hasTranscript && hasSlides) {
-      contextDescription = `Masz do dyspozycji TRANSKRYPT rozmowy (${sorted.length} linii) oraz ${frames.length} SLAJDÓW z prezentacji.`;
-    } else if (hasSlides) {
-      contextDescription = `Masz do dyspozycji ${frames.length} SLAJDÓW z prezentacji (brak transkryptu — opisz zawartość wizualną).`;
-    } else if (hasTranscript) {
-      contextDescription = `Masz do dyspozycji TRANSKRYPT rozmowy (${sorted.length} linii, brak slajdów).`;
-    } else {
-      contextDescription = "Brak danych wejściowych.";
-    }
 
     contentParts.push({
       type: "text",
       text: `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
 
-${contextDescription}
+## DANE WEJŚCIOWE
+${hasTranscript ? `- Transkrypt audio: ${sorted.length} linii z timestampami` : "- Brak transkryptu audio"}
+${hasSlides ? `- ${frames.length} slajdów prezentacji z timestampami (każdy oznaczony @ MM:SS)` : "- Brak slajdów"}
 
-## TWOJE ZADANIE
+## KLUCZOWE ZADANIE: AGREGACJA CHRONOLOGICZNA
 
-### 1. ANALIZA SLAJDÓW (jeśli dostępne)
-Dla KAŻDEGO slajdu:
-- Odczytaj CAŁĄ widoczną treść (tytuły, punkty, dane, wykresy, tabele)
-- Zanotuj co dokładnie przedstawia slajd
-- Powiąż go z odpowiednim fragmentem dyskusji na podstawie znacznika czasowego
+Musisz stworzyć **zintegrowany zapis spotkania** który łączy transkrypcję audio ze slajdami w jedną spójną, chronologiczną narrację.
 
-### 2. KORELACJA SLAJD ↔ DIALOG
-- Dopasuj każdy slajd do fragmentu transkryptu, który go omawia
-- Wyciągnij CO mówili uczestnicy O danym slajdzie — ich komentarze, pytania, wątpliwości
-- Zidentyfikuj dodatkowy kontekst z rozmowy, którego NIE MA na slajdach
+### Jak to zrobić:
 
-### 3. PODSUMOWANIE
-Napisz zwięzłe ale kompletne podsumowanie (3-6 zdań) obejmujące:
-- Główny temat i cel spotkania
-- Kluczowe ustalenia i decyzje
-- Ważne dane liczbowe ze slajdów
-- Wnioski i następne kroki
+1. **ODCZYTAJ każdy slajd** — wyciągnij CAŁĄ treść: tytuły, nagłówki, bullet pointy, dane liczbowe, wykresy, tabele, adnotacje.
 
-### 4. ZADANIA I DECYZJE
-- Wyodrębnij KONKRETNE zadania do wykonania (kto, co, kiedy)
-- Zapisz DECYZJE podjęte podczas spotkania z uzasadnieniem
+2. **PORÓWNAJ transkrypt z slajdami** — znajdź gdzie w rozmowie omawiano dany slajd:
+   - Dopasuj po timestampach (slajd @ 3:00 → dialog wokół [3:00])
+   - Dopasuj po kontekście (jeśli slajd pokazuje "Budżet Q1" a ktoś mówi o budżecie)
 
-${hasTranscript ? `## TRANSKRYPT:
+3. **STWÓRZ ZINTEGROWANY ZAPIS** (pole "integrated_transcript"):
+   Połącz dialog z slajdami chronologicznie. Format:
+   \`\`\`
+   [0:00] Jan Kowalski: Dzień dobry, zaczynamy spotkanie...
+   [0:45] Anna Nowak: Przejdźmy do prezentacji.
+   [1:00] 📊 SLAJD: "Agenda spotkania" — 1. Wyniki Q1, 2. Plan Q2, 3. Budżet
+   [1:15] Anna Nowak: Jak widzicie na slajdzie, mamy trzy punkty do omówienia...
+   [3:00] 📊 SLAJD: "Wyniki Q1" — Przychód: 2.5M PLN (+15%), Koszty: 1.8M PLN, EBITDA: 700K PLN
+   [3:10] Jan Kowalski: Wzrost o 15% to lepiej niż planowaliśmy...
+   \`\`\`
+
+4. **IDENTYFIKUJ ROZBIEŻNOŚCI** — co mówili uczestnicy INNEGO niż jest na slajdach?
+   Np. slajd pokazuje "plan: 2M" ale ktoś mówi "realnie to będzie 1.8M"
+
+5. **WYCIĄGNIJ kontekst ukryty** — informacje z dialogu których NIE MA na slajdach
+   (uwagi prywatne, wątpliwości, decyzje ustne, background knowledge)
+
+${hasTranscript ? `## TRANSKRYPT AUDIO:
 ---
 ${transcriptText.slice(0, 15000)}
----` : "## (Brak transkryptu)"}
+---` : "## (Brak transkryptu audio)"}
 
-${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności chronologicznej:` : ""}`,
+${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności chronologicznej. Odczytaj KAŻDY dokładnie:` : ""}`,
     });
 
     for (const frame of frames) {
@@ -209,7 +205,7 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
       });
     }
 
-    // 5. Call Gemini with tool calling
+    // 5. Call Gemini with tool calling — enhanced schema
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -223,30 +219,34 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
           type: "function",
           function: {
             name: "save_meeting_analysis",
-            description: "Save structured meeting analysis with slide-dialogue correlation",
+            description: "Save integrated meeting analysis with chronological slide-dialogue aggregation",
             parameters: {
               type: "object",
               properties: {
-                summary: { 
-                  type: "string", 
-                  description: "Kompletne podsumowanie 3-6 zdań po polsku. Zawiera główny temat, kluczowe ustalenia, dane liczbowe ze slajdów i wnioski." 
+                summary: {
+                  type: "string",
+                  description: "Kompletne podsumowanie 3-6 zdań po polsku. Główny temat, kluczowe ustalenia, dane liczbowe ze slajdów, wnioski i następne kroki."
                 },
-                sentiment: { 
-                  type: "string", 
-                  enum: ["pozytywny", "neutralny", "negatywny", "mieszany"] 
+                integrated_transcript: {
+                  type: "string",
+                  description: "ZINTEGROWANY chronologiczny zapis spotkania łączący dialog audio z treścią slajdów. Format: [MM:SS] Mówca: tekst... oraz 📊 SLAJD: treść slajdu. Slajdy wstawione w odpowiednie miejsca dialogu. Każda linia na nowej linii."
                 },
-                participants: { 
-                  type: "array", 
+                sentiment: {
+                  type: "string",
+                  enum: ["pozytywny", "neutralny", "negatywny", "mieszany"]
+                },
+                participants: {
+                  type: "array",
                   items: { type: "string" },
                   description: "Lista uczestników zidentyfikowanych z transkryptu"
                 },
-                tags: { 
-                  type: "array", 
-                  items: { type: "string" }, 
-                  description: "3-7 tagów tematycznych" 
+                tags: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "3-7 tagów tematycznych"
                 },
-                key_quotes: { 
-                  type: "array", 
+                key_quotes: {
+                  type: "array",
                   items: { type: "string" },
                   description: "Najważniejsze cytaty z dyskusji (dokładne słowa uczestników)"
                 },
@@ -257,7 +257,7 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
                     properties: {
                       task: { type: "string", description: "Konkretne zadanie do wykonania" },
                       owner: { type: "string", description: "Osoba odpowiedzialna" },
-                      deadline: { type: "string", description: "Termin realizacji (jeśli podano)" },
+                      deadline: { type: "string", description: "Termin (jeśli podano)" },
                     },
                     required: ["task", "owner"],
                     additionalProperties: false,
@@ -269,8 +269,8 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
                     type: "object",
                     properties: {
                       decision: { type: "string", description: "Podjęta decyzja" },
-                      rationale: { type: "string", description: "Uzasadnienie lub kontekst decyzji" },
-                      timestamp: { type: "string", description: "Przybliżony moment podjęcia decyzji (MM:SS)" },
+                      rationale: { type: "string", description: "Uzasadnienie lub kontekst" },
+                      timestamp: { type: "string", description: "Moment decyzji (MM:SS)" },
                     },
                     required: ["decision"],
                     additionalProperties: false,
@@ -281,17 +281,20 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
                   items: {
                     type: "object",
                     properties: {
-                      slide_timestamp: { type: "string", description: "Znacznik czasowy slajdu (MM:SS)" },
-                      slide_content: { type: "string", description: "Pełna treść odczytana ze slajdu (tytuły, punkty, dane)" },
-                      discussion_context: { type: "string", description: "Co mówili uczestnicy o tym slajdzie — komentarze, pytania, dodatkowy kontekst z dyskusji" },
+                      slide_timestamp: { type: "string", description: "Timestamp slajdu (MM:SS)" },
+                      slide_title: { type: "string", description: "Tytuł/nagłówek slajdu" },
+                      slide_content: { type: "string", description: "Pełna treść ze slajdu: tytuły, punkty, dane, wykresy, tabele" },
+                      discussion_context: { type: "string", description: "Co mówili uczestnicy o tym slajdzie — komentarze, pytania, wątpliwości" },
+                      extra_context: { type: "string", description: "Informacje z dialogu których NIE MA na slajdzie (uwagi, decyzje ustne, background)" },
+                      discrepancies: { type: "string", description: "Rozbieżności między slajdem a tym co powiedziano ustnie (jeśli są)" },
                     },
-                    required: ["slide_content"],
+                    required: ["slide_content", "discussion_context"],
                     additionalProperties: false,
                   },
-                  description: "Analiza każdego slajdu z korelacją do fragmentów dyskusji"
+                  description: "Szczegółowa analiza każdego slajdu z korelacją do dialogu"
                 },
               },
-              required: ["summary", "sentiment", "tags", "action_items", "decisions", "slide_insights"],
+              required: ["summary", "integrated_transcript", "sentiment", "tags", "action_items", "decisions", "slide_insights"],
               additionalProperties: false,
             },
           },
