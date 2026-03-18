@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages, Wifi, WifiOff } from "lucide-react";
+import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages, Wifi, WifiOff, Image } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
@@ -31,6 +31,7 @@ interface Props {
   recordingFilename: string;
   recordingSizeBytes?: number | null;
   meetingId: string;
+  framesVersion?: number;
   onAudioReady?: (segments: { url: string; name: string }[]) => void;
   onTranscriptGenerated?: () => void;
 }
@@ -52,6 +53,7 @@ export default function AudioExtractor({
   recordingFilename,
   recordingSizeBytes,
   meetingId,
+  framesVersion = 0,
   onAudioReady,
   onTranscriptGenerated,
 }: Props) {
@@ -67,9 +69,70 @@ export default function AudioExtractor({
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [transcribeMode, setTranscribeMode] = useState<"online" | "offline">("online");
   const ffmpegRef = useRef<any>(null);
+  const [cachedFrames, setCachedFrames] = useState<{ base64: string; timestamp: string }[]>([]);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
   const mp3Filename = `${stem}.mp3`;
+
+  // Load frames for visual context (online mode)
+  useEffect(() => {
+    loadFramesForContext();
+  }, [recordingFilename, framesVersion]);
+
+  async function loadFramesForContext() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const prefixes = [`${user.id}/frames/${stem}`];
+      const { data: allDirs } = await supabase.storage.from("recordings").list(`${user.id}/frames`);
+      if (allDirs) {
+        for (const d of allDirs) {
+          if (d.name.startsWith(stem + "_part") && d.id) {
+            prefixes.push(`${user.id}/frames/${d.name}`);
+          }
+        }
+      }
+
+      const frameFiles: { path: string; timestamp: number }[] = [];
+      for (const prefix of prefixes) {
+        const { data: files } = await supabase.storage.from("recordings").list(prefix, { limit: 50, sortBy: { column: "name", order: "asc" } });
+        if (files) {
+          for (const f of files) {
+            if (!f.name.match(/\.(jpg|jpeg|png)$/i)) continue;
+            const match = f.name.match(/frame_(\d+)s?\./);
+            frameFiles.push({ path: `${prefix}/${f.name}`, timestamp: match ? parseInt(match[1]) : 0 });
+          }
+        }
+      }
+
+      if (frameFiles.length === 0) { setCachedFrames([]); return; }
+      frameFiles.sort((a, b) => a.timestamp - b.timestamp);
+      const selected = frameFiles.slice(0, 20);
+
+      const { data: signed } = await supabase.storage.from("recordings").createSignedUrls(selected.map(f => f.path), 3600);
+      if (!signed) { setCachedFrames([]); return; }
+
+      const frames: { base64: string; timestamp: string }[] = [];
+      for (let i = 0; i < signed.length; i++) {
+        if (!signed[i].signedUrl) continue;
+        try {
+          const res = await fetch(signed[i].signedUrl);
+          const blob = await res.blob();
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          const secs = selected[i].timestamp;
+          const mins = Math.floor(secs / 60);
+          const s = secs % 60;
+          frames.push({ base64: uint8ToBase64(bytes), timestamp: `${mins}:${String(s).padStart(2, "0")}` });
+        } catch { /* skip */ }
+      }
+      setCachedFrames(frames);
+      console.log(`Loaded ${frames.length} frames for visual context`);
+    } catch (err) {
+      console.error("Load frames for context error:", err);
+      setCachedFrames([]);
+    }
+  }
 
   // Check if MP3 already exists on server
   useEffect(() => {
@@ -405,7 +468,7 @@ export default function AudioExtractor({
           }
           const base64 = uint8ToBase64(bytes);
           const { data, error } = await supabase.functions.invoke("transcribe-audio", {
-            body: { audioBase64: base64, mimeType: "audio/mpeg", language },
+            body: { audioBase64: base64, mimeType: "audio/mpeg", language, frames: cachedFrames.length > 0 ? cachedFrames : undefined },
           });
           if (error) { console.error(`Seg ${i + 1}:`, error); continue; }
           if (data?.error) { console.error(`Seg ${i + 1}:`, data.error); toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" }); continue; }
@@ -720,6 +783,17 @@ export default function AudioExtractor({
                     Gemini (online)
                   </button>
                 </div>
+
+                {transcribeMode === "online" && (
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Image className="w-3 h-3" />
+                    {cachedFrames.length > 0 ? (
+                      <span className="text-primary">{cachedFrames.length} klatek jako kontekst wizualny</span>
+                    ) : (
+                      <span>Brak klatek — generuj klatki aby poprawić jakość</span>
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={handleBatchTranscribe}

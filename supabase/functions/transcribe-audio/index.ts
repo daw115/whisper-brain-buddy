@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64, mimeType = "audio/mpeg", language = "pl" } = await req.json();
+    const { audioBase64, mimeType = "audio/mpeg", language = "pl", frames = [] } = await req.json();
 
     if (!audioBase64) {
       return new Response(JSON.stringify({ error: "audioBase64 is required" }), {
@@ -20,6 +20,10 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // frames: optional array of { base64: string, timestamp: string }
+    const hasFrames = Array.isArray(frames) && frames.length > 0;
+    console.log(`Frames provided: ${hasFrames ? frames.length : 0}`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
@@ -49,8 +53,14 @@ serve(async (req) => {
         messages: [
           {
             role: "user",
-            content: [
-              {
+            content: (() => {
+              const parts: any[] = [];
+
+              const frameNote = hasFrames
+                ? `\n- Masz również ${frames.length} klatek/slajdów z prezentacji — użyj ich jako kontekstu wizualnego do lepszego zrozumienia treści`
+                : "";
+
+              parts.push({
                 type: "text",
                 text: `Jesteś profesjonalnym transkrybentem. Dokonaj dokładnej transkrypcji poniższego nagrania audio.
 
@@ -61,17 +71,30 @@ Zasady:
 - Dodaj znaczniki czasowe co ~30 sekund w formacie [MM:SS]
 - Zachowaj naturalną interpunkcję
 - Oznacz niezrozumiałe fragmenty jako [niezrozumiałe]
-- Jeśli są dźwięki tła, zaznacz je w nawiasach kwadratowych np. [śmiech], [cisza]
+- Jeśli są dźwięki tła, zaznacz je w nawiasach kwadratowych np. [śmiech], [cisza]${frameNote}
 
 Zwróć transkrypcję jako strukturyzowane dane.`,
-              },
-              {
+              });
+
+              // Add audio
+              parts.push({
                 type: "image_url",
-                image_url: {
-                  url: `data:${mimeType};base64,${audioBase64}`,
-                },
-              },
-            ],
+                image_url: { url: `data:${mimeType};base64,${audioBase64}` },
+              });
+
+              // Add frame images as visual context
+              if (hasFrames) {
+                for (const frame of frames.slice(0, 10)) {
+                  parts.push({ type: "text", text: `--- Slajd @ ${frame.timestamp || "?"} ---` });
+                  parts.push({
+                    type: "image_url",
+                    image_url: { url: `data:image/jpeg;base64,${frame.base64}` },
+                  });
+                }
+              }
+
+              return parts;
+            })(),
           },
         ],
         tools: [
