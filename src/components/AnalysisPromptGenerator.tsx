@@ -185,68 +185,53 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   }, [frames, geminiSlides]);
 
   function buildPrompt(): string {
-    const transcriptLines = meeting.transcript_lines || [];
-    const hasTranscript = transcriptLines.length > 0;
     const hasIntegrated = !!integratedTranscript;
 
-    const transcriptSection = hasIntegrated
-      ? `ZAGREGOWANA TRANSKRYPCJA (audio + slajdy, chronologicznie):
+    return `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
+
+## DANE WEJŚCIOWE
+${hasIntegrated ? "- Zagregowana transkrypcja chronologiczna (dialogi uczestników + treść slajdów, połączone przez AI)" : "- Brak zagregowanej transkrypcji — przeanalizuj załączone materiały"}
+${selectedFrames.length > 0 ? `- ${selectedFrames.length} obrazów slajdów prezentacji (wybrane unikalne slajdy)` : ""}
+
+${hasIntegrated ? `## ZAGREGOWANA TRANSKRYPCJA
+Poniższa transkrypcja łączy dialogi uczestników (odczytane z napisów na dole ekranu) z treścią slajdów (📊 SLAJD:) w kolejności chronologicznej. Została już zagregowana przez AI — traktuj ją jako wiarygodne źródło.
+
 ---
-${integratedTranscript!.slice(0, 20000)}
----
-Powyższa transkrypcja łączy dialog uczestników z treścią slajdów (oznaczonych 📊 SLAJD:).
-Została już zweryfikowana i skorygowana — traktuj ją jako główne źródło danych.`
-      : hasTranscript
-      ? `TRANSKRYPT AUDIO:
----
-${transcriptLines
-  .sort((a, b) => a.line_order - b.line_order)
-  .map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`)
-  .join("\n")
-  .slice(0, 15000)}
----`
-      : `TRANSKRYPT: Brak automatycznego transkryptu.
-WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
+${integratedTranscript!.slice(0, 25000)}
+---` : ""}
 
-    const frameSection = selectedFrames.length > 0
-      ? `\nZAŁĄCZONE OBRAZY: ${selectedFrames.length} wybranych slajdów prezentacji (wyselekcjonowane przez AI).
-Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
-Powiąż treść slajdów z dialogiem w transkrypcji.`
-      : "";
+${selectedFrames.length > 0 ? `## ZAŁĄCZONE OBRAZY SLAJDÓW
+W archiwum ZIP znajduje się ${selectedFrames.length} obrazów slajdów prezentacji.
+Dla KAŻDEGO slajdu:
+1. Odczytaj CAŁĄ treść: tytuły, bullet pointy, dane liczbowe, wykresy, tabele
+2. Zweryfikuj dane z transkrypcji — wyłap szczegóły nieujęte w tekście
+3. Powiąż treść slajdu z odpowiednim momentem dialogu` : ""}
 
-    return `Przeanalizuj spotkanie biznesowe i zwróć wynik w formacie JSON.
+## ZADANIA
+1. Przeanalizuj przebieg spotkania na podstawie transkrypcji i slajdów
+2. Dla KAŻDEGO slajdu: opisz treść, kontekst dyskusji, wnioski
+3. Wyciągnij decyzje, zadania i podsumowanie
+4. Zidentyfikuj rozbieżności między slajdami a dialogiem
+5. Wyłap kontekst ukryty — informacje z dialogu których NIE MA na slajdach
 
-DANE WEJŚCIOWE:
-${hasIntegrated ? "- Zagregowana transkrypcja (dialog + slajdy w jednym dokumencie chronologicznym)" : ""}
-${!hasIntegrated && hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii` : ""}
-${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
-${selectedFrames.length > 0 ? `- ${selectedFrames.length} wyselekcjonowanych slajdów prezentacji (wgrane jako obrazy)` : ""}
-
-${transcriptSection}
-${frameSection}
-
-ZADANIA:
-1. Na podstawie transkrypcji${hasIntegrated ? " (która już łączy dialog z treścią slajdów)" : ""} przeanalizuj przebieg spotkania
-${selectedFrames.length > 0 ? "2. Przeanalizuj załączone obrazy slajdów — zweryfikuj dane, odczytaj wykresy/tabele, wyłap szczegóły niejęte w transkrypcji" : ""}
-${selectedFrames.length > 0 ? "3. Dla KAŻDEGO slajdu opisz: co zawiera, co mówiono w kontekście, jakie decyzje/wnioski wynikły" : ""}
-- Wyciągnij decyzje, zadania i podsumowanie
-
-SZCZEGÓLNY NACISK NA:
+## SZCZEGÓLNY NACISK NA
 - **Analiza slajdów**: Każdy slajd = osobny insight z pełną treścią + kontekstem dialogu
-- **Dane liczbowe**: Wyciągnij WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
+- **Dane liczbowe**: WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
 - **Rozbieżności**: Co mówiono innego niż jest na slajdach
-- **Kontekst ukryty**: Informacje z dialogu których NIE MA na slajdach (decyzje ustne, komentarze)
+- **Kontekst ukryty**: Decyzje ustne, komentarze, background niewidoczny na slajdach
 
+## FORMAT WYNIKU
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
-  "summary": "Zwięzłe podsumowanie spotkania w 3-5 zdaniach po polsku, z kluczowymi danymi liczbowymi",
+  "summary": "Kompletne podsumowanie 3-6 zdań po polsku. Główny temat, kluczowe ustalenia, dane liczbowe, wnioski i następne kroki.",
+  "integrated_transcript": "ZINTEGROWANY chronologiczny zapis spotkania. Format: [MM:SS] Mówca: tekst... oraz 📊 SLAJD: treść slajdu wstawiona w odpowiednie miejsca dialogu.",
   "sentiment": "pozytywny | neutralny | negatywny | mieszany",
   "participants": ["Imię Nazwisko uczestnika 1", "Imię Nazwisko uczestnika 2"],
-  "key_quotes": ["Najważniejszy cytat — Autor"],
   "tags": ["temat1", "temat2"],
+  "key_quotes": ["Najważniejszy cytat — dokładne słowa uczestnika"],
   "action_items": [
     {
-      "task": "Opis zadania do wykonania",
+      "task": "Konkretne zadanie do wykonania",
       "owner": "Osoba odpowiedzialna",
       "deadline": "YYYY-MM-DD lub null"
     }
@@ -254,29 +239,30 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
   "decisions": [
     {
       "decision": "Podjęta decyzja",
-      "rationale": "Uzasadnienie lub null",
+      "rationale": "Uzasadnienie lub kontekst",
       "timestamp": "MM:SS lub null"
     }
-  ]${selectedFrames.length > 0 ? `,
+  ],
   "slide_insights": [
     {
       "slide_timestamp": "MM:SS",
-      "slide_title": "Tytuł slajdu",
-      "slide_content": "Pełna treść: tytuły, punkty, dane, wykresy",
-      "discussion_context": "Co mówili uczestnicy o tym slajdzie",
-      "extra_context": "Informacje z dialogu których NIE MA na slajdzie",
-      "discrepancies": "Rozbieżności między slajdem a tym co powiedziano (jeśli są)"
+      "slide_title": "Tytuł/nagłówek slajdu",
+      "slide_content": "Pełna treść ze slajdu: tytuły, punkty, dane, wykresy, tabele",
+      "discussion_context": "Co mówili uczestnicy o tym slajdzie — komentarze, pytania, wątpliwości",
+      "extra_context": "Informacje z dialogu których NIE MA na slajdzie (uwagi, decyzje ustne, background)",
+      "discrepancies": "Rozbieżności między slajdem a tym co powiedziano ustnie (jeśli są)"
     }
-  ]` : ""}
+  ]
 }
 
-ZASADY:
-1. Zidentyfikuj mówców po kontekście
+## ZASADY
+1. Zidentyfikuj mówców po kontekście — użyj pełnych imion
 2. Action items = konkretne zadania z właścicielem
-3. Decisions = wyraźnie podjęte decyzje
+3. Decisions = wyraźnie podjęte decyzje (nie domysły)
 4. Summary = zwięzłe, z danymi liczbowymi, po polsku
 5. Tags = główne tematy (max 7)
-${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!" : ""}`;
+6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!
+7. integrated_transcript = poprawiona/wzbogacona wersja transkrypcji z wstawionymi slajdami`;
   }
 
   function handleCopy() {
