@@ -163,24 +163,34 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
     setTranscribePhase("converting");
 
     try {
-      toast.loading(`Pobieranie segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+      toast.loading(`Konwersja segmentu #${idx + 1} do WAV…`, { id: `trans-${idx}` });
 
-      // Download segment
-      const response = await fetch(seg.signedUrl);
-      if (!response.ok) throw new Error(`Błąd pobierania: ${response.status}`);
-      const arrayBuffer = await response.arrayBuffer();
-      
-      toast.loading(`Dekodowanie audio segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+      // Convert to PCM f32le 16kHz mono via FFmpeg
+      const { fetchFile } = await import("@ffmpeg/util");
+      const ffmpeg = await getFFmpeg();
 
-      // Use Web Audio API to decode and resample to 16kHz mono
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-      
-      // Get mono channel data (already resampled to 16kHz by AudioContext)
-      const audioData = decoded.getChannelData(0);
-      audioCtx.close();
-      
-      console.log(`Segment #${idx + 1}: ${(audioData.length / 16000).toFixed(0)}s, ${decoded.sampleRate}Hz`);
+      const videoData = await fetchFile(seg.signedUrl);
+      const inputName = `trans_input_${idx}.webm`;
+      const outputName = `trans_output_${idx}.pcm`;
+      await ffmpeg.writeFile(inputName, videoData);
+
+      await ffmpeg.exec([
+        "-i", inputName,
+        "-vn", "-ar", "16000", "-ac", "1",
+        "-f", "f32le", outputName,
+      ]);
+
+      const rawPcm = await ffmpeg.readFile(outputName);
+      await ffmpeg.deleteFile(inputName);
+      await ffmpeg.deleteFile(outputName);
+
+      const audioData = new Float32Array((rawPcm as Uint8Array).buffer);
+      console.log(`Segment #${idx + 1}: ${(audioData.length / 16000).toFixed(0)}s PCM audio`);
+
+      if (audioData.length === 0) {
+        toast.error("Nie udało się wyodrębnić audio z segmentu", { id: `trans-${idx}` });
+        return;
+      }
 
       setTranscribePhase("loading-model");
       toast.loading(`Ładowanie Whisper…`, { id: `trans-${idx}` });
@@ -228,7 +238,6 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
         return;
       }
 
-      // Get existing transcript lines count to append (not overwrite)
       setTranscribePhase("saving");
       const { data: existing } = await supabase
         .from("transcript_lines")
