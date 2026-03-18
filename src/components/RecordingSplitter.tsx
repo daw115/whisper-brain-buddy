@@ -11,9 +11,19 @@ interface Props {
   onComplete?: () => void;
 }
 
+type SplitPhase = "idle" | "downloading" | "splitting" | "uploading";
+
+const phaseLabels: Record<SplitPhase, string> = {
+  idle: "",
+  downloading: "Pobieranie nagrania…",
+  splitting: "Dzielenie przez FFmpeg…",
+  uploading: "Przesyłanie części",
+};
+
 export default function RecordingSplitter({ recordingUrl, recordingFilename, recordingSizeBytes, onComplete }: Props) {
   const [chunkMB, setChunkMB] = useState(100);
   const [splitting, setSplitting] = useState(false);
+  const [phase, setPhase] = useState<SplitPhase>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0, percent: 0 });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -29,46 +39,127 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
     const ac = new AbortController();
     abortRef.current = ac;
     setSplitting(true);
+    setPhase("downloading");
     setProgress({ current: 0, total: 0, percent: 0 });
 
     try {
       toast.loading("Pobieranie nagrania…", { id: "split" });
+
+      // 1. Download the file
       const res = await fetch(recordingUrl);
       const blob = await res.blob();
+      const inputBytes = new Uint8Array(await blob.arrayBuffer());
 
       if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
 
+      // 2. Load FFmpeg
+      setPhase("splitting");
+      toast.loading("Ładowanie FFmpeg…", { id: "split" });
+
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile } = await import("@ffmpeg/util");
+
+      const ffmpeg = new FFmpeg();
+
+      // Use CDN for the core
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+      await ffmpeg.load({
+        coreURL: `${baseURL}/ffmpeg-core.js`,
+        wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+      });
+
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
+      // 3. Write input file
+      const ext = recordingFilename.match(/\.[^.]+$/)?.[0] || ".webm";
+      const inputName = `input${ext}`;
+      await ffmpeg.writeFile(inputName, inputBytes);
+
+      // 4. Get duration
+      let durationSec = 0;
+      ffmpeg.on("log", ({ message }) => {
+        const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
+        if (match) {
+          durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
+        }
+      });
+
+      // Probe duration with a quick ffmpeg call
+      await ffmpeg.exec(["-i", inputName, "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
+
+      if (durationSec <= 0) {
+        // Fallback: estimate from file size and typical bitrate
+        // ~2 MB/s is typical for screen recording webm
+        durationSec = blob.size / (2 * 1024 * 1024);
+        if (durationSec < 10) durationSec = 60; // minimum fallback
+      }
+
+      // Calculate segment duration based on desired MB size
+      const bytesPerSec = blob.size / durationSec;
       const chunkBytes = chunkMB * 1024 * 1024;
-      const totalParts = Math.ceil(blob.size / chunkBytes);
+      const segmentDurationSec = Math.max(10, Math.floor(chunkBytes / bytesPerSec));
+      const totalParts = Math.ceil(durationSec / segmentDurationSec);
 
       if (totalParts <= 1) {
         toast.info("Plik jest mniejszy niż zadany rozmiar — nie wymaga podziału", { id: "split" });
         return;
       }
 
+      toast.loading(`Dzielenie na ~${totalParts} części przez FFmpeg…`, { id: "split" });
+
+      // 5. Use FFmpeg segment muxer to split into proper files
+      const outputPattern = `part_%03d${ext}`;
+      await ffmpeg.exec([
+        "-i", inputName,
+        "-c", "copy",
+        "-f", "segment",
+        "-segment_time", String(segmentDurationSec),
+        "-reset_timestamps", "1",
+        outputPattern,
+      ]);
+
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
+      // 6. Read output files
+      const parts: { name: string; data: Uint8Array }[] = [];
+      for (let i = 0; i < 999; i++) {
+        const partName = `part_${String(i).padStart(3, "0")}${ext}`;
+        try {
+          const data = await ffmpeg.readFile(partName) as Uint8Array;
+          if (data.length > 0) {
+            parts.push({ name: partName, data });
+          }
+        } catch {
+          break; // No more parts
+        }
+      }
+
+      if (parts.length === 0) {
+        toast.error("FFmpeg nie wygenerował żadnych segmentów", { id: "split" });
+        return;
+      }
+
+      // 7. Upload parts
+      setPhase("uploading");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Nie zalogowano");
 
       const stem = recordingFilename.replace(/\.[^.]+$/, "");
-      const ext = recordingFilename.match(/\.[^.]+$/)?.[0] || ".webm";
       let uploaded = 0;
+      setProgress({ current: 0, total: parts.length, percent: 0 });
 
-      setProgress({ current: 0, total: totalParts, percent: 0 });
-      toast.loading(`Dzielenie na ${totalParts} części…`, { id: "split" });
-
-      for (let i = 0; i < totalParts; i++) {
+      for (let i = 0; i < parts.length; i++) {
         if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
-
-        const start = i * chunkBytes;
-        const end = Math.min(start + chunkBytes, blob.size);
-        const chunk = blob.slice(start, end, blob.type);
 
         const partFilename = `${stem}_part${i + 1}${ext}`;
         const path = `${user.id}/${partFilename}`;
+        const partBlob = new Blob([new Uint8Array(parts[i].data) as any], { type: blob.type || "video/webm" });
+
+        toast.loading(`Przesyłanie części ${i + 1}/${parts.length}…`, { id: "split" });
 
         const { error } = await supabase.storage
           .from("recordings")
-          .upload(path, chunk, {
+          .upload(path, partBlob, {
             contentType: blob.type || "video/webm",
             upsert: true,
           });
@@ -81,12 +172,21 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
 
         setProgress({
           current: i + 1,
-          total: totalParts,
-          percent: Math.round(((i + 1) / totalParts) * 100),
+          total: parts.length,
+          percent: Math.round(((i + 1) / parts.length) * 100),
         });
       }
 
-      toast.success(`Podzielono na ${uploaded}/${totalParts} części (po ${chunkMB} MB)`, {
+      // Cleanup FFmpeg
+      try {
+        await ffmpeg.deleteFile(inputName);
+        for (const p of parts) {
+          await ffmpeg.deleteFile(p.name).catch(() => {});
+        }
+        ffmpeg.terminate();
+      } catch {}
+
+      toast.success(`Podzielono na ${uploaded}/${parts.length} części (FFmpeg, ~${chunkMB} MB)`, {
         id: "split",
         duration: 5000,
       });
@@ -101,6 +201,7 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
     } finally {
       abortRef.current = null;
       setSplitting(false);
+      setPhase("idle");
       setProgress({ current: 0, total: 0, percent: 0 });
     }
   }
@@ -150,13 +251,16 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
         </p>
       )}
 
-      {splitting && progress.total > 0 && (
+      {splitting && (
         <div className="space-y-1.5 pt-1">
           <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>Przesyłanie części ({progress.current}/{progress.total})</span>
-            <span className="font-mono">{progress.percent}%</span>
+            <span>
+              {phaseLabels[phase]}
+              {phase === "uploading" && progress.total > 0 && ` (${progress.current}/${progress.total})`}
+            </span>
+            {progress.total > 0 && <span className="font-mono">{progress.percent}%</span>}
           </div>
-          <Progress value={progress.percent} className="h-1.5" />
+          <Progress value={phase === "uploading" ? progress.percent : undefined} className="h-1.5" />
         </div>
       )}
 
