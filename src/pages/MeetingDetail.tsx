@@ -14,6 +14,7 @@ import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
 import RecordingSplitter from "@/components/RecordingSplitter";
 import RecordingSegments from "@/components/RecordingSegments";
+import FrameGallery from "@/components/FrameGallery";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
