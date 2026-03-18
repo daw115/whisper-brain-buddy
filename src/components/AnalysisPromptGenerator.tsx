@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
-import { Download, Copy, Check, ImageIcon, Loader2, FileText, Music, Package } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Download, Copy, Check, ImageIcon, Loader2, FileText, Music, Package, Archive } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { MeetingWithRelations } from "@/hooks/use-meetings";
 import { toast } from "sonner";
+import JSZip from "jszip";
 
 interface Props {
   meeting: MeetingWithRelations;
@@ -16,6 +17,14 @@ interface FrameInfo {
   timestamp?: string;
 }
 
+interface SlideInfo {
+  timestamp: string;
+  title: string;
+  full_text: string;
+  slide_type?: string;
+  data_values?: string;
+}
+
 export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesVersion = 0 }: Props) {
   const [frames, setFrames] = useState<FrameInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +36,7 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [showAllFrames, setShowAllFrames] = useState(false);
   const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
   const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
+  const [geminiSlides, setGeminiSlides] = useState<SlideInfo[]>([]);
 
   useEffect(() => {
     loadFrames();
@@ -49,13 +59,15 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
         if (json.slide_transcript) {
           setSlideTranscript(json.slide_transcript);
         }
+        if (json.slides && Array.isArray(json.slides)) {
+          setGeminiSlides(json.slides);
+        }
       }
     } catch {}
   }
 
   async function loadIntegratedTranscript() {
     try {
-      // Try merged first, then gemini
       for (const src of ["merged", "gemini"]) {
         const { data } = await supabase
           .from("meeting_analyses")
@@ -88,12 +100,9 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
     if (!user) { setLoading(false); return; }
 
     const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
-
-    // Scan for frames from main recording AND all segments
     const allFrameInfos: FrameInfo[] = [];
     const prefixes = [`${user.id}/frames/${stem}`];
 
-    // Also look for segment frame folders: stem_part1, stem_part2, etc.
     const { data: frameDirs } = await supabase.storage
       .from("recordings")
       .list(`${user.id}/frames`, { limit: 200 });
@@ -129,7 +138,6 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
             const num = parseInt(matchIdx[1]);
             timestamp = `#${num}`;
           }
-          // Add segment prefix for clarity
           const segMatch = prefix.match(/_part(\d+)$/);
           if (segMatch) {
             timestamp = `S${segMatch[1]}/${timestamp}`;
@@ -143,15 +151,42 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
     setLoading(false);
   }
 
+  // Filter frames to only those selected by Gemini slide-transcript
+  const selectedFrames = useMemo(() => {
+    if (geminiSlides.length === 0) return frames; // no filter if no slide analysis
+
+    // Build a set of normalized timestamps from Gemini slides
+    const slideTimestamps = new Set<string>();
+    for (const slide of geminiSlides) {
+      // Normalize: "01:30" -> "1:30", keep as-is too
+      const ts = slide.timestamp;
+      slideTimestamps.add(ts);
+      // Also add without leading zero
+      const noLeading = ts.replace(/^0+(\d+:)/, "$1");
+      slideTimestamps.add(noLeading);
+      // Convert MM:SS to total seconds for matching
+      const parts = ts.split(":");
+      if (parts.length === 2) {
+        const totalSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        slideTimestamps.add(`${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, "0")}`);
+      }
+    }
+
+    // Match frames whose timestamp (possibly with segment prefix) matches
+    const matched = frames.filter(f => {
+      if (!f.timestamp) return false;
+      // Strip segment prefix like "S1/" for matching
+      const cleanTs = f.timestamp.replace(/^S\d+\//, "");
+      return slideTimestamps.has(cleanTs);
+    });
+
+    // If matching yields very few results (< 30% of slides), fall back to all frames
+    return matched.length >= Math.max(1, geminiSlides.length * 0.3) ? matched : frames;
+  }, [frames, geminiSlides]);
+
   function buildPrompt(): string {
     const transcriptLines = meeting.transcript_lines || [];
     const hasTranscript = transcriptLines.length > 0;
-
-    // Check if transcript has multiple sources (segments)
-    const speakers = new Set(transcriptLines.map((l) => l.speaker));
-    const hasSegmentSources = [...speakers].some((s) => s.startsWith("Seg"));
-
-    // Use integrated transcript if available (already merged audio+slides by Gemini)
     const hasIntegrated = !!integratedTranscript;
 
     const transcriptSection = hasIntegrated
@@ -162,7 +197,7 @@ ${integratedTranscript!.slice(0, 20000)}
 Powyższa transkrypcja łączy dialog uczestników z treścią slajdów (oznaczonych 📊 SLAJD:).
 Została już zweryfikowana i skorygowana — traktuj ją jako główne źródło danych.`
       : hasTranscript
-      ? `TRANSKRYPT AUDIO${hasSegmentSources ? " (z wielu segmentów, oznaczony źródłem)" : " (z Web Speech API, może zawierać błędy)"}:
+      ? `TRANSKRYPT AUDIO:
 ---
 ${transcriptLines
   .sort((a, b) => a.line_order - b.line_order)
@@ -173,8 +208,8 @@ ${transcriptLines
       : `TRANSKRYPT: Brak automatycznego transkryptu.
 WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
-    const frameSection = frames.length > 0
-      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji.
+    const frameSection = selectedFrames.length > 0
+      ? `\nZAŁĄCZONE OBRAZY: ${selectedFrames.length} wybranych slajdów prezentacji (wyselekcjonowane przez AI).
 Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
 Powiąż treść slajdów z dialogiem w transkrypcji.`
       : "";
@@ -185,15 +220,15 @@ DANE WEJŚCIOWE:
 ${hasIntegrated ? "- Zagregowana transkrypcja (dialog + slajdy w jednym dokumencie chronologicznym)" : ""}
 ${!hasIntegrated && hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii` : ""}
 ${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
-${frames.length > 0 ? `- ${frames.length} zrzutów ekranu slajdów prezentacji (wgrane jako obrazy)` : ""}
+${selectedFrames.length > 0 ? `- ${selectedFrames.length} wyselekcjonowanych slajdów prezentacji (wgrane jako obrazy)` : ""}
 
 ${transcriptSection}
 ${frameSection}
 
 ZADANIA:
 1. Na podstawie transkrypcji${hasIntegrated ? " (która już łączy dialog z treścią slajdów)" : ""} przeanalizuj przebieg spotkania
-${frames.length > 0 ? "2. Przeanalizuj załączone obrazy slajdów — zweryfikuj dane, odczytaj wykresy/tabele, wyłap szczegóły nieujęte w transkrypcji" : ""}
-${frames.length > 0 ? "3. Dla KAŻDEGO slajdu opisz: co zawiera, co mówiono w kontekście, jakie decyzje/wnioski wynikły" : ""}
+${selectedFrames.length > 0 ? "2. Przeanalizuj załączone obrazy slajdów — zweryfikuj dane, odczytaj wykresy/tabele, wyłap szczegóły niejęte w transkrypcji" : ""}
+${selectedFrames.length > 0 ? "3. Dla KAŻDEGO slajdu opisz: co zawiera, co mówiono w kontekście, jakie decyzje/wnioski wynikły" : ""}
 - Wyciągnij decyzje, zadania i podsumowanie
 
 SZCZEGÓLNY NACISK NA:
@@ -222,7 +257,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
       "rationale": "Uzasadnienie lub null",
       "timestamp": "MM:SS lub null"
     }
-  ]${frames.length > 0 ? `,
+  ]${selectedFrames.length > 0 ? `,
   "slide_insights": [
     {
       "slide_timestamp": "MM:SS",
@@ -241,7 +276,7 @@ ZASADY:
 3. Decisions = wyraźnie podjęte decyzje
 4. Summary = zwięzłe, z danymi liczbowymi, po polsku
 5. Tags = główne tematy (max 7)
-${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!" : ""}`;
+${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!" : ""}`;
   }
 
   function handleCopy() {
@@ -300,69 +335,60 @@ ${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu
     document.body.removeChild(a);
   }
 
-  async function handleDownloadFrames() {
+  async function handleDownloadZip() {
     setDownloading(true);
     try {
-      for (const frame of frames) {
-        const a = document.createElement("a");
-        a.href = frame.url;
-        a.download = frame.path.split("/").pop() || "frame.jpg";
-        a.target = "_blank";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        await new Promise((r) => setTimeout(r, 300));
-      }
-      toast.success(`${frames.length} klatek pobranych`);
-    } finally {
-      setDownloading(false);
-    }
-  }
+      const zip = new JSZip();
+      const safeTitle = meeting.title.replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g, "_").slice(0, 50);
 
-  async function handleDownloadPackage() {
-    setDownloading(true);
-    try {
-      // 1. Download prompt as .txt
-      const promptText = buildPrompt();
-      const promptBlob = new Blob([promptText], { type: "text/plain;charset=utf-8" });
-      const promptUrl = URL.createObjectURL(promptBlob);
-      const promptA = document.createElement("a");
-      promptA.href = promptUrl;
-      promptA.download = `${meeting.title.replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g, "_")}_prompt.txt`;
-      document.body.appendChild(promptA);
-      promptA.click();
-      document.body.removeChild(promptA);
-      URL.revokeObjectURL(promptUrl);
-      toast.info("Prompt pobrany jako .txt");
+      // 1. Add prompt.txt
+      toast.info("Pakuję prompt…");
+      zip.file("prompt.txt", buildPrompt());
 
-      await new Promise((r) => setTimeout(r, 500));
-
-      // 2. Download all frames
-      if (frames.length > 0) {
-        for (let i = 0; i < frames.length; i++) {
-          const frame = frames[i];
-          const a = document.createElement("a");
-          a.href = frame.url;
-          a.download = `slajd_${String(i + 1).padStart(2, "0")}_${frame.timestamp?.replace(":", "m") || i}.jpg`;
-          a.target = "_blank";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          await new Promise((r) => setTimeout(r, 300));
+      // 2. Add selected frames (fetch as blob)
+      if (selectedFrames.length > 0) {
+        toast.info(`Pakuję ${selectedFrames.length} slajdów…`);
+        const slidesFolder = zip.folder("slajdy");
+        for (let i = 0; i < selectedFrames.length; i++) {
+          const frame = selectedFrames[i];
+          try {
+            const resp = await fetch(frame.url);
+            const blob = await resp.blob();
+            const ext = blob.type.includes("png") ? "png" : "jpg";
+            const name = `slajd_${String(i + 1).padStart(2, "0")}_${frame.timestamp?.replace(/[:/]/g, "m") || i}.${ext}`;
+            slidesFolder!.file(name, blob);
+          } catch (err) {
+            console.warn(`Failed to fetch frame ${i}:`, err);
+          }
         }
-        toast.info(`${frames.length} slajdów pobranych`);
       }
 
-      // 3. Download MP3 if ready
+      // 3. Add MP3 if ready
       if (mp3Url) {
-        await new Promise((r) => setTimeout(r, 500));
-        downloadMp3();
-        toast.info("MP3 pobrany");
+        toast.info("Pakuję MP3…");
+        const resp = await fetch(mp3Url);
+        const blob = await resp.blob();
+        const mp3Name = (meeting.recording_filename || "recording").replace(/\.[^.]+$/, ".mp3");
+        zip.file(mp3Name, blob);
       }
 
-      toast.success("Paczka ChatGPT pobrana! Wgraj wszystkie pliki do czatu GPT-4o.");
+      // 4. Generate and download ZIP
+      toast.info("Generuję archiwum ZIP…");
+      const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+      const zipUrl = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = zipUrl;
+      a.download = `${safeTitle}_paczka_GPT.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(zipUrl);
+
+      const sizeMB = (zipBlob.size / (1024 * 1024)).toFixed(1);
+      toast.success(`Paczka ZIP pobrana (${sizeMB} MB). Wgraj do ChatGPT GPT-4o.`);
     } catch (err: any) {
-      toast.error("Błąd pobierania: " + (err.message || "nieznany"));
+      console.error("ZIP error:", err);
+      toast.error("Błąd tworzenia ZIP: " + (err.message || "nieznany"));
     } finally {
       setDownloading(false);
     }
@@ -379,7 +405,7 @@ ${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu
 
   const transcriptLines = meeting.transcript_lines || [];
   const hasTranscript = transcriptLines.length > 0;
-  const step1Ready = !!mp3Url;
+  const hasGeminiFilter = geminiSlides.length > 0 && selectedFrames.length < frames.length;
 
   return (
     <div className="space-y-4">
@@ -389,91 +415,89 @@ ${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu
         </h2>
       </div>
 
-      {/* One-click download */}
+      {/* One-click ZIP download */}
       <button
-        onClick={handleDownloadPackage}
+        onClick={handleDownloadZip}
         disabled={downloading || convertingMp3}
         className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 press-effect"
       >
         {downloading ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            Pobieram paczkę…
+            Pakuję ZIP…
           </>
         ) : (
           <>
-            <Package className="w-4 h-4" />
-            Pobierz paczkę ({[
-              hasTranscript ? "prompt" : null,
-              frames.length > 0 ? `${frames.length} slajdów` : null,
+            <Archive className="w-4 h-4" />
+            Pobierz ZIP ({[
+              "prompt",
+              selectedFrames.length > 0 ? `${selectedFrames.length} slajdów` : null,
               mp3Url ? "MP3" : null,
-            ].filter(Boolean).join(" + ") || "prompt"})
+            ].filter(Boolean).join(" + ")})
           </>
         )}
       </button>
       <p className="text-[10px] text-muted-foreground text-center">
-        Pobiera: prompt.txt{frames.length > 0 ? ` + ${frames.length} klatek slajdów` : ""}{mp3Url ? " + MP3" : ""}
-        {!mp3Url && recordingUrl ? " (skonwertuj MP3 poniżej aby dodać do paczki)" : ""}
+        Jeden plik ZIP: prompt.txt
+        {selectedFrames.length > 0 ? ` + ${selectedFrames.length} slajdów${hasGeminiFilter ? " (wybrane przez Gemini)" : ""}` : ""}
+        {mp3Url ? " + MP3" : ""}
+        {!mp3Url && recordingUrl ? " (skonwertuj MP3 poniżej aby dodać)" : ""}
       </p>
 
       {/* Model recommendation */}
       <div className="bg-primary/5 border border-primary/20 rounded-md p-3">
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          Wgraj wszystkie pobrane pliki do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong> i wyślij.
+          Rozpakuj ZIP i wgraj wszystkie pliki do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
         </p>
       </div>
 
       {/* Data summary */}
       <div className="bg-muted/30 border border-border rounded-md p-3 space-y-1">
-        <p className="text-[11px] font-medium text-foreground">📊 Dostępne dane:</p>
+        <p className="text-[11px] font-medium text-foreground">📊 Zawartość paczki:</p>
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
           {integratedTranscript && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              ✨ Zagregowana transkrypcja (audio + slajdy) — najlepsza jakość
+              ✨ Zagregowana transkrypcja (audio + slajdy) — w prompcie
             </li>
           )}
           {!integratedTranscript && hasTranscript && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              Transkrypt audio: {transcriptLines.length} linii
-              {[...new Set(transcriptLines.map((l) => l.speaker))].some((s) => s.startsWith("Seg")) && " (z wielu segmentów)"}
+              Transkrypt audio: {transcriptLines.length} linii — w prompcie
             </li>
           )}
           {!integratedTranscript && !hasTranscript && (
             <li className="text-muted-foreground/60">✗ Brak transkryptu — wgraj MP3 do ChatGPT</li>
           )}
-          {recordingUrl && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> Nagranie dostępne do konwersji MP3</li>}
-          {frames.length > 0 && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> {frames.length} klatek slajdów</li>}
+          {selectedFrames.length > 0 && (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              {selectedFrames.length} slajdów
+              {hasGeminiFilter && ` (z ${frames.length} klatek — wybrane przez Gemini)`}
+            </li>
+          )}
+          {mp3Url && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> MP3 ({mp3Size} MB)</li>}
+          {recordingUrl && !mp3Url && <li className="text-muted-foreground/60">⚠ MP3 nieskonwertowany — skonwertuj poniżej</li>}
         </ul>
       </div>
 
-      {/* Step 1: MP3 */}
-      <div className="border border-border rounded-md p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-            <Music className="w-3.5 h-3.5" />
-            Krok 1: Przygotuj MP3
-          </span>
-          {step1Ready && <Check className="w-3.5 h-3.5 text-primary" />}
-        </div>
+      {/* MP3 conversion */}
+      {recordingUrl && (
+        <div className="border border-border rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5" />
+              Przygotuj MP3
+            </span>
+            {mp3Url && <Check className="w-3.5 h-3.5 text-primary" />}
+          </div>
 
-        {hasTranscript && !step1Ready && (
-          <p className="text-[10px] text-muted-foreground/80 italic">
-            Masz już transkrypt — MP3 jest opcjonalny (do weryfikacji przez ChatGPT).
-          </p>
-        )}
-
-        {recordingUrl ? (
-          mp3Url ? (
-            <button
-              onClick={downloadMp3}
-              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Pobierz MP3 ({mp3Size} MB)
-            </button>
+          {mp3Url ? (
+            <p className="text-[10px] text-primary flex items-center gap-1">
+              <Check className="w-3 h-3" /> MP3 gotowy ({mp3Size} MB) — zostanie dodany do ZIP
+            </p>
           ) : (
             <button
               onClick={handleConvertMp3}
@@ -492,69 +516,60 @@ ${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu
                 </>
               )}
             </button>
-          )
-        ) : (
-          <p className="text-[10px] text-muted-foreground italic">Brak nagrania</p>
-        )}
-      </div>
-
-      {/* Step 2: Frames */}
-      <div className="border border-border rounded-md p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-            <ImageIcon className="w-3.5 h-3.5" />
-            Krok 2: Pobierz slajdy
-          </span>
-          {frames.length > 0 && <span className="text-[10px] font-mono-data text-muted-foreground">{frames.length} klatek</span>}
+          )}
         </div>
+      )}
 
-        {frames.length > 0 ? (
-          <>
-            <div className="grid grid-cols-4 gap-1">
-              {(showAllFrames ? frames : frames.slice(0, 8)).map((frame, i) => (
-                <div key={i} className="relative group">
-                  <img
-                    src={frame.url}
-                    alt={`Slajd @ ${frame.timestamp}`}
-                    className="w-full aspect-video object-cover rounded border border-border"
-                    loading="lazy"
-                  />
-                  <span className="absolute bottom-0.5 right-0.5 text-[8px] font-mono-data bg-background/80 px-0.5 rounded">
-                    {frame.timestamp}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {frames.length > 8 && (
-              <button
-                onClick={() => setShowAllFrames(!showAllFrames)}
-                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showAllFrames ? "Pokaż mniej" : `Pokaż wszystkie (${frames.length})`}
-              </button>
-            )}
+      {/* Selected frames preview */}
+      {selectedFrames.length > 0 && (
+        <div className="border border-border rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
+              <ImageIcon className="w-3.5 h-3.5" />
+              Slajdy w paczce
+            </span>
+            <span className="text-[10px] font-mono-data text-muted-foreground">
+              {selectedFrames.length}{hasGeminiFilter ? ` / ${frames.length}` : ""} klatek
+            </span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1">
+            {(showAllFrames ? selectedFrames : selectedFrames.slice(0, 8)).map((frame, i) => (
+              <div key={i} className="relative group">
+                <img
+                  src={frame.url}
+                  alt={`Slajd @ ${frame.timestamp}`}
+                  className="w-full aspect-video object-cover rounded border border-border"
+                  loading="lazy"
+                />
+                <span className="absolute bottom-0.5 right-0.5 text-[8px] font-mono-data bg-background/80 px-0.5 rounded">
+                  {frame.timestamp}
+                </span>
+              </div>
+            ))}
+          </div>
+          {selectedFrames.length > 8 && (
             <button
-              onClick={handleDownloadFrames}
-              disabled={downloading}
-              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+              onClick={() => setShowAllFrames(!showAllFrames)}
+              className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
             >
-              {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              Pobierz wszystkie klatki ({frames.length})
+              {showAllFrames ? "Pokaż mniej" : `Pokaż wszystkie (${selectedFrames.length})`}
             </button>
-          </>
-        ) : (
-          <p className="text-[10px] text-muted-foreground italic">
-            Brak klatek slajdów. Zostaną przechwycone automatycznie podczas następnego nagrania.
-          </p>
-        )}
-      </div>
+          )}
+          {hasGeminiFilter && (
+            <p className="text-[10px] text-primary/80">
+              🎯 Gemini wybrała {selectedFrames.length} unikalnych slajdów z {frames.length} klatek
+            </p>
+          )}
+        </div>
+      )}
 
-      {/* Step 3: Prompt */}
+      {/* Prompt preview */}
       <div className="border border-border rounded-md overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/30">
           <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
             <FileText className="w-3.5 h-3.5" />
-            Krok 3: Skopiuj prompt
+            Prompt (w ZIP)
           </span>
           <button
             onClick={handleCopy}
@@ -573,23 +588,16 @@ ${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu
       <div className="bg-muted/30 border border-border rounded-md p-3 text-xs text-muted-foreground space-y-1.5">
         <p className="font-medium text-foreground flex items-center gap-1.5">
           <Package className="w-3.5 h-3.5" />
-          Jak użyć w ChatGPT Plus:
+          Jak użyć:
         </p>
         <ol className="list-decimal list-inside space-y-1 text-[11px]">
+          <li>Kliknij <strong>Pobierz ZIP</strong> powyżej</li>
+          <li>Rozpakuj archiwum</li>
           <li>Otwórz <strong>chat.openai.com</strong> → model <strong>GPT-4o</strong></li>
-          {recordingUrl && !hasTranscript && <li>Wgraj plik <strong>MP3</strong> (krok 1) jako załącznik</li>}
-          {recordingUrl && hasTranscript && <li><em>(Opcjonalnie)</em> Wgraj <strong>MP3</strong> do weryfikacji transkryptu</li>}
-          {frames.length > 0 && <li>Wgraj <strong>klatki slajdów</strong> (krok 2) jako obrazy</li>}
-          <li>Wklej <strong>prompt</strong> (krok 3) — zawiera transkrypt{hasTranscript ? ` (${transcriptLines.length} linii)` : ""}</li>
-          <li>Wyślij i poczekaj na wynik</li>
-          <li>Skopiuj wynikowy <strong>JSON</strong></li>
+          <li>Wgraj <strong>wszystkie pliki</strong> z rozpakowanego folderu</li>
+          <li>Wyślij i poczekaj na wynik JSON</li>
           <li>Wklej JSON w sekcji <strong>"Importuj wynik analizy"</strong> poniżej</li>
         </ol>
-        {hasTranscript && (
-          <p className="text-[10px] text-primary/80 mt-1">
-            💡 Transkrypt jest już wbudowany w prompt — ChatGPT go przeanalizuje bez potrzeby osobnego pliku.
-          </p>
-        )}
       </div>
     </div>
   );
