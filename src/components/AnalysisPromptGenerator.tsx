@@ -7,6 +7,7 @@ import { toast } from "sonner";
 interface Props {
   meeting: MeetingWithRelations;
   recordingUrl: string | null;
+  framesVersion?: number;
 }
 
 interface FrameInfo {
