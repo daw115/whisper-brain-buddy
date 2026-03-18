@@ -30,6 +30,8 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   }, [meeting.id, meeting.recording_filename, framesVersion]);
 
   async function loadFrames() {
+    setLoading(true);
+    setFrames([]);
     if (!meeting.recording_filename) {
       setLoading(false);
       return;
