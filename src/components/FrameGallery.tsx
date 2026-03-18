@@ -36,15 +36,15 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
 
       // List all frame folders matching this recording stem and its parts
       const prefixes = [stem];
-      // Also find part stems
-      const { data: userFiles } = await supabase.storage
+      // Discover part directories directly from frames/ folder
+      const { data: frameDirs } = await supabase.storage
         .from("recordings")
-        .list(user.id, { limit: 200, sortBy: { column: "name", order: "asc" } });
+        .list(`${user.id}/frames`, { limit: 200, sortBy: { column: "name", order: "asc" } });
 
-      if (userFiles) {
-        for (const f of userFiles) {
-          if (f.name.startsWith(stem + "_part") && (f.name.endsWith(".webm") || f.name.endsWith(".mp4") || f.name.endsWith(".mkv"))) {
-            prefixes.push(f.name.replace(/\.[^.]+$/, ""));
+      if (frameDirs) {
+        for (const d of frameDirs) {
+          if (d.name.startsWith(stem + "_part") && d.id) {
+            prefixes.push(d.name);
           }
         }
       }
