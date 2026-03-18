@@ -558,7 +558,6 @@ export default function AudioExtractor({
         }
 
         cumulativeOffsetSec += segmentDurationSec;
-        }
 
         // Delay for online mode to avoid rate limiting
         if (transcribeMode === "online" && i < segsWithUrl.length - 1) {
