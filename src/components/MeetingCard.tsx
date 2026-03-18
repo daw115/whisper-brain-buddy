@@ -58,7 +58,10 @@ export default function MeetingCard({ meeting, index }: MeetingCardProps) {
           </span>
         )}
         {meeting.categories && (
-          <span className="text-[10px] font-mono-data text-primary bg-primary/10 px-2 py-0.5 rounded">
+          <span
+            className="text-[10px] font-mono-data px-2 py-0.5 rounded font-medium"
+            style={{ backgroundColor: `${meeting.categories.color}20`, color: meeting.categories.color }}
+          >
             {meeting.categories.name}
           </span>
         )}

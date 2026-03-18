@@ -52,6 +52,7 @@ export type DbParticipant = {
 export type DbCategory = {
   id: string;
   name: string;
+  color: string;
 };
 
 // Full meeting with relations
