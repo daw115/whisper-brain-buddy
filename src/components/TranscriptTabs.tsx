@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
-import { Mic, Layers, Merge } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { Mic, Images, Merge } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import TranscriptView from "@/components/TranscriptView";
 import type { MeetingWithRelations } from "@/hooks/use-meetings";
 
@@ -19,16 +20,39 @@ type Tab = "audio" | "slides" | "aggregated";
 
 export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }: Props) {
   const [tab, setTab] = useState<Tab>("audio");
+  const [frameThumbnails, setFrameThumbnails] = useState<{ url: string; timestamp: string }[]>([]);
 
-  const slideTranscript = useMemo(() => {
-    const entry = analyses.find(a => a.source === "slide-transcript");
-    return entry?.analysis_json as { slide_transcript?: string; slides?: any[]; total_slides?: number } | null;
+  // Get unique frames data from analyses
+  const uniqueFramesData = useMemo(() => {
+    const entry = analyses.find(a => a.source === "unique-frames");
+    return entry?.analysis_json as { frames?: { path: string; timestamp: number; timestamp_formatted: string }[]; total_unique?: number } | null;
   }, [analyses]);
 
   const aggregated = useMemo(() => {
     const entry = analyses.find(a => a.source === "merged");
-    return entry?.analysis_json as { integrated_transcript?: string; summary?: string; slide_dialogue_correlations?: any[] } | null;
+    return entry?.analysis_json as { integrated_transcript?: string; summary?: string; speakers?: string[] } | null;
   }, [analyses]);
+
+  // Load signed URLs for unique frame thumbnails
+  useEffect(() => {
+    if (!uniqueFramesData?.frames?.length) {
+      setFrameThumbnails([]);
+      return;
+    }
+
+    (async () => {
+      const thumbnails: { url: string; timestamp: string }[] = [];
+      for (const frame of uniqueFramesData.frames!) {
+        const { data } = await supabase.storage
+          .from("recordings")
+          .createSignedUrl(frame.path, 60 * 60);
+        if (data?.signedUrl) {
+          thumbnails.push({ url: data.signedUrl, timestamp: frame.timestamp_formatted });
+        }
+      }
+      setFrameThumbnails(thumbnails);
+    })();
+  }, [uniqueFramesData]);
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode; count?: string }[] = [
     {
@@ -39,9 +63,9 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
     },
     {
       key: "slides",
-      label: "Slajdy OCR",
-      icon: <Layers className="w-3 h-3" />,
-      count: slideTranscript?.total_slides ? `${slideTranscript.total_slides}` : undefined,
+      label: "Slajdy",
+      icon: <Images className="w-3 h-3" />,
+      count: uniqueFramesData?.total_unique ? `${uniqueFramesData.total_unique}` : undefined,
     },
     {
       key: "aggregated",
@@ -95,37 +119,31 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
         </div>
       )}
 
-      {/* Slides OCR tab */}
+      {/* Slides tab — unique frame thumbnails */}
       {tab === "slides" && (
         <div>
           <span className="text-[10px] text-muted-foreground block mb-3">
-            Treść slajdów prezentacji (OCR z głównej części ekranu)
+            Unikalne klatki prezentacji (screeny do paczki ChatGPT)
           </span>
-          {slideTranscript?.slides && slideTranscript.slides.length > 0 ? (
-            <div className="space-y-3">
-              {slideTranscript.slides.map((slide: any, i: number) => (
-                <div key={i} className="border border-border rounded-md p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-mono-data text-muted-foreground">
-                      📊 {slide.timestamp}
-                    </span>
-                    {slide.slide_type && (
-                      <span className="text-[9px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                        {slide.slide_type}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs font-semibold text-foreground mb-1">{slide.title}</p>
-                  <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed">{slide.full_text}</p>
-                  {slide.data_values && (
-                    <p className="text-[10px] text-primary/80 mt-1">📈 {slide.data_values}</p>
-                  )}
+          {frameThumbnails.length > 0 ? (
+            <div className="grid grid-cols-3 gap-2">
+              {frameThumbnails.map((frame, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={frame.url}
+                    alt={`Slajd @ ${frame.timestamp}`}
+                    className="w-full aspect-video object-cover rounded border border-border"
+                    loading="lazy"
+                  />
+                  <span className="absolute bottom-1 right-1 text-[8px] font-mono-data bg-background/80 px-1 py-0.5 rounded">
+                    {frame.timestamp}
+                  </span>
                 </div>
               ))}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground italic">
-              Brak danych OCR slajdów. Uruchom "OCR: dialogi + slajdy + agregacja".
+              Brak unikalnych klatek. Uruchom "OCR: klatki + dialogi + agregacja".
             </p>
           )}
         </div>
@@ -135,7 +153,7 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
       {tab === "aggregated" && (
         <div>
           <span className="text-[10px] text-muted-foreground block mb-3">
-            Zagregowana transkrypcja: dialogi + slajdy + audio w jednym chronologicznym zapisie
+            Zagregowana transkrypcja: dialogi (OCR) + audio w jednym chronologicznym zapisie
           </span>
           {aggregated?.integrated_transcript ? (
             <div>
@@ -144,29 +162,22 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
                   <p className="text-xs text-foreground leading-relaxed">{aggregated.summary}</p>
                 </div>
               )}
+              {aggregated.speakers && aggregated.speakers.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {aggregated.speakers.map((s, i) => (
+                    <span key={i} className="text-[9px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
               <pre className="text-[11px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed max-h-[60vh] overflow-y-auto">
                 {aggregated.integrated_transcript}
               </pre>
-              {aggregated.slide_dialogue_correlations && aggregated.slide_dialogue_correlations.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-border">
-                  <p className="text-[10px] font-medium text-foreground mb-2">🔗 Korelacje slajd↔dialog:</p>
-                  <div className="space-y-2">
-                    {aggregated.slide_dialogue_correlations.map((c: any, i: number) => (
-                      <div key={i} className="text-[10px] bg-muted/30 rounded p-2">
-                        <span className="font-mono-data text-muted-foreground">{c.slide_timestamp}</span>{" "}
-                        <span className="font-medium text-foreground">{c.slide_title}</span>
-                        {c.extra_verbal_info && (
-                          <p className="text-muted-foreground mt-0.5">💬 {c.extra_verbal_info}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground italic">
-              Brak zagregowanej transkrypcji. Uruchom "OCR: dialogi + slajdy + agregacja".
+              Brak zagregowanej transkrypcji. Uruchom "OCR: klatki + dialogi + agregacja".
             </p>
           )}
         </div>
