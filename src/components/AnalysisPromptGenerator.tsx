@@ -27,7 +27,7 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
 
   useEffect(() => {
     loadFrames();
-  }, [meeting.id, meeting.recording_filename]);
+  }, [meeting.id, meeting.recording_filename, framesVersion]);
 
   async function loadFrames() {
     if (!meeting.recording_filename) {
