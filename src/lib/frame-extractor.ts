@@ -26,6 +26,7 @@ export async function extractFrames(
   maxFrames = 30,
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
+  timestampOffset = 0,
 ): Promise<ExtractedFrame[]> {
   const url = URL.createObjectURL(videoBlob);
 
