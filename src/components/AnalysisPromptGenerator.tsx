@@ -54,7 +54,7 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
 
     if (frameDirs) {
       for (const dir of frameDirs) {
-        if (dir.name.startsWith(stem + "_part") && dir.id) {
+        if (dir.name.startsWith(stem + "_part")) {
           prefixes.push(`${user.id}/frames/${dir.name}`);
         }
       }
@@ -256,6 +256,55 @@ ${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiz
     }
   }
 
+  async function handleDownloadPackage() {
+    setDownloading(true);
+    try {
+      // 1. Download prompt as .txt
+      const promptText = buildPrompt();
+      const promptBlob = new Blob([promptText], { type: "text/plain;charset=utf-8" });
+      const promptUrl = URL.createObjectURL(promptBlob);
+      const promptA = document.createElement("a");
+      promptA.href = promptUrl;
+      promptA.download = `${meeting.title.replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g, "_")}_prompt.txt`;
+      document.body.appendChild(promptA);
+      promptA.click();
+      document.body.removeChild(promptA);
+      URL.revokeObjectURL(promptUrl);
+      toast.info("Prompt pobrany jako .txt");
+
+      await new Promise((r) => setTimeout(r, 500));
+
+      // 2. Download all frames
+      if (frames.length > 0) {
+        for (let i = 0; i < frames.length; i++) {
+          const frame = frames[i];
+          const a = document.createElement("a");
+          a.href = frame.url;
+          a.download = `slajd_${String(i + 1).padStart(2, "0")}_${frame.timestamp?.replace(":", "m") || i}.jpg`;
+          a.target = "_blank";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        toast.info(`${frames.length} slajdów pobranych`);
+      }
+
+      // 3. Download MP3 if ready
+      if (mp3Url) {
+        await new Promise((r) => setTimeout(r, 500));
+        downloadMp3();
+        toast.info("MP3 pobrany");
+      }
+
+      toast.success("Paczka ChatGPT pobrana! Wgraj wszystkie pliki do czatu GPT-4o.");
+    } catch (err: any) {
+      toast.error("Błąd pobierania: " + (err.message || "nieznany"));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
@@ -271,16 +320,44 @@ ${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiz
 
   return (
     <div className="space-y-4">
-      <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">
-        Analiza w ChatGPT Plus
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">
+          Paczka danych ChatGPT
+        </h2>
+      </div>
+
+      {/* One-click download */}
+      <button
+        onClick={handleDownloadPackage}
+        disabled={downloading || convertingMp3}
+        className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 press-effect"
+      >
+        {downloading ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Pobieram paczkę…
+          </>
+        ) : (
+          <>
+            <Package className="w-4 h-4" />
+            Pobierz paczkę ({[
+              hasTranscript ? "prompt" : null,
+              frames.length > 0 ? `${frames.length} slajdów` : null,
+              mp3Url ? "MP3" : null,
+            ].filter(Boolean).join(" + ") || "prompt"})
+          </>
+        )}
+      </button>
+      <p className="text-[10px] text-muted-foreground text-center">
+        Pobiera: prompt.txt{frames.length > 0 ? ` + ${frames.length} klatek slajdów` : ""}{mp3Url ? " + MP3" : ""}
+        {!mp3Url && recordingUrl ? " (skonwertuj MP3 poniżej aby dodać do paczki)" : ""}
+      </p>
 
       {/* Model recommendation */}
       <div className="bg-primary/5 border border-primary/20 rounded-md p-3">
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          GPT-4o obsługuje audio (MP3) + obrazy (slajdy) w jednym czacie.
-          Otwórz <strong>chat.openai.com</strong> → wybierz <strong>GPT-4o</strong> → załącz pliki.
+          Wgraj wszystkie pobrane pliki do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong> i wyślij.
         </p>
       </div>
 
