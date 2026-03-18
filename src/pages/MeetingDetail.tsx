@@ -23,7 +23,7 @@ export default function MeetingDetail() {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [framesVersion, setFramesVersion] = useState(0);
-  const [segmentsVersion, setSegmentsVersion] = useState(0);
+  
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
   const updateMeeting = useUpdateMeeting();
