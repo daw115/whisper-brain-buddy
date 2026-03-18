@@ -7,6 +7,7 @@ import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
+import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 
 export default function MeetingDetail() {
   const { id } = useParams();
