@@ -784,6 +784,17 @@ export default function AudioExtractor({
                   </button>
                 </div>
 
+                {transcribeMode === "online" && (
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Image className="w-3 h-3" />
+                    {cachedFrames.length > 0 ? (
+                      <span className="text-primary">{cachedFrames.length} klatek jako kontekst wizualny</span>
+                    ) : (
+                      <span>Brak klatek — generuj klatki aby poprawić jakość</span>
+                    )}
+                  </div>
+                )}
+
                 <button
                   onClick={handleBatchTranscribe}
                   disabled={busy}
