@@ -30,9 +30,7 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [convertingMp3, setConvertingMp3] = useState(false);
-  const [mp3Url, setMp3Url] = useState<string | null>(null);
-  const [mp3Size, setMp3Size] = useState<string | null>(null);
+  const [showAllFrames, setShowAllFrames] = useState(false);
   const [showAllFrames, setShowAllFrames] = useState(false);
   const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
   const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
