@@ -193,8 +193,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
           .download(frame.path);
         if (!blob) continue;
 
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        const frameHash = hashBytes(bytes);
+        const frameHash = await hashCroppedSlide(blob);
         const tsFormatted = formatTs(frame.timestamp);
 
         if (!seenHashes.has(frameHash)) {
