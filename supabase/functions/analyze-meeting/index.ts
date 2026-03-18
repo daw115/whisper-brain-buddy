@@ -123,14 +123,18 @@ serve(async (req) => {
 
 Masz do dyspozycji:
 - Transkrypt rozmowy (jeśli dostępny)
-- ${frames.length} klatek/slajdów z prezentacji
+- ${frames.length} unikalnych klatek/slajdów z prezentacji (duplikaty zostały usunięte)
+
+WAŻNE: Każdy slajd ma znacznik czasu (@ MM:SS) odpowiadający momentowi prezentacji.
+Dopasuj treść slajdów do odpowiednich fragmentów transkryptu na podstawie tych znaczników czasowych.
+W analizie wskaż, które slajdy odnoszą się do których części dyskusji.
 
 TRANSKRYPT:
 ---
 ${transcriptText.slice(0, 15000)}
 ---
 
-Poniżej klatki slajdów z prezentacji:`,
+Poniżej klatki slajdów z prezentacji (posortowane chronologicznie, bez duplikatów):`,
     });
 
     for (const frame of frames) {
