@@ -751,19 +751,49 @@ export default function SegmentToolbox({
         </div>
 
         <div className="space-y-0.5">
-          {videoSegments.map((seg, idx) => (
-            <div key={seg.path} className="flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 transition-colors">
-              <Checkbox
-                checked={selectedVideo.has(idx)}
-                onCheckedChange={() => toggleVideo(idx)}
-                className="h-3.5 w-3.5"
-              />
-              <span className="text-[10px] font-mono-data text-primary font-bold w-5">#{seg.partNumber || idx + 1}</span>
-              <span className="text-[10px] font-mono-data text-muted-foreground truncate flex-1">{seg.name}</span>
-              <span className="text-[10px] font-mono-data text-muted-foreground/60">{seg.sizeMB} MB</span>
-            </div>
-          ))}
+          {videoSegments.map((seg, idx) => {
+            const sizeMBNum = parseFloat(seg.sizeMB);
+            const isOversized = sizeMBNum > 100;
+            return (
+              <div key={seg.path} className={`flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 transition-colors ${isOversized ? "border border-destructive/30 bg-destructive/5" : ""}`}>
+                <Checkbox
+                  checked={selectedVideo.has(idx)}
+                  onCheckedChange={() => toggleVideo(idx)}
+                  className="h-3.5 w-3.5"
+                />
+                <span className="text-[10px] font-mono-data text-primary font-bold w-5">#{seg.partNumber || idx + 1}</span>
+                <span className="text-[10px] font-mono-data text-muted-foreground truncate flex-1">{seg.name}</span>
+                <span className={`text-[10px] font-mono-data ${isOversized ? "text-destructive font-bold" : "text-muted-foreground/60"}`}>{seg.sizeMB} MB</span>
+                {isOversized && (
+                  <button
+                    onClick={() => handleSplitVideoSegment(seg)}
+                    disabled={busy}
+                    title={`Podziel na części po ~${splitChunkMB} MB`}
+                    className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-destructive/30 hover:bg-destructive/10"
+                  >
+                    <Scissors className="w-3 h-3" />
+                    Podziel
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
+
+        {/* Split chunk size selector — shown if any segment >100MB */}
+        {videoSegments.some(s => parseFloat(s.sizeMB) > 100) && (
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1">
+            <Scissors className="w-3 h-3" />
+            <span>Rozmiar części:</span>
+            <div className="flex gap-1">
+              {[50, 100, 200].map(v => (
+                <button key={v} onClick={() => setSplitChunkMB(v)} disabled={busy}
+                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${splitChunkMB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                >{v} MB</button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* TOOLBAR */}
