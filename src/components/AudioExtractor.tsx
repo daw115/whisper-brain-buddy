@@ -31,6 +31,7 @@ interface Props {
   recordingFilename: string;
   recordingSizeBytes?: number | null;
   meetingId: string;
+  framesVersion?: number;
   onAudioReady?: (segments: { url: string; name: string }[]) => void;
   onTranscriptGenerated?: () => void;
 }
