@@ -54,6 +54,8 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
     const entry = analyses.find(a => a.source === "merged");
     return entry?.analysis_json as {
       integrated_transcript?: string;
+      conversation_transcript?: string;
+      slides_section?: string;
       summary?: string;
       speakers?: string[];
       slide_markers?: { timestamp: string; slide_title: string; slide_summary: string }[];
