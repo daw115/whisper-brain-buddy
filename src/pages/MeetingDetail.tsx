@@ -8,6 +8,7 @@ import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
+import AudioConverter from "@/components/AudioConverter";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -157,6 +158,7 @@ export default function MeetingDetail() {
                       >
                         <Download className="w-3.5 h-3.5" /> Download
                       </a>
+                      <AudioConverter recordingUrl={recordingUrl} filename={meeting.recording_filename!} />
                     </>
                   )}
                 </div>
