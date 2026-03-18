@@ -15,6 +15,7 @@ import AnalysisComparison from "@/components/AnalysisComparison";
 import RecordingSplitter from "@/components/RecordingSplitter";
 import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
+import TranscribeButton from "@/components/TranscribeButton";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
@@ -222,6 +223,18 @@ export default function MeetingDetail() {
                 <p className="text-xs font-mono-data text-muted-foreground/60">
                   {(meeting.recording_size_bytes / (1024 * 1024)).toFixed(1)} MB
                 </p>
+              )}
+
+              {/* AI Transcription */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <TranscribeButton
+                    meetingId={meeting.id}
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                    onComplete={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
+                  />
+                </div>
               )}
 
               {/* Frame regeneration */}
