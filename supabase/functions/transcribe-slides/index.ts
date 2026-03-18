@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { decode as decodeJpeg, encode as encodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
+// No jpeg-js import — we skip server-side image cropping to avoid CPU limits
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
