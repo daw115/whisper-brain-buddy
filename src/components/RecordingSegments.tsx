@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
-import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2, Images, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Progress } from "@/components/ui/progress";
 import FrameRegenerator from "@/components/FrameRegenerator";
+import type { ProgressInfo } from "@/lib/frame-extractor";
 
 interface SegmentFile {
   name: string;
@@ -22,6 +24,10 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [expandedFrames, setExpandedFrames] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ segIdx: number; total: number; phase: string; percent: number } | null>(null);
+  const [batchInterval, setBatchInterval] = useState(30);
+  const batchAbortRef = useRef<AbortController | null>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
 
@@ -136,6 +142,59 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
+  async function handleBatchFrames() {
+    const segsWithUrl = segments.filter((s) => s.signedUrl);
+    if (segsWithUrl.length === 0) return;
+
+    const ac = new AbortController();
+    batchAbortRef.current = ac;
+    setBatchGenerating(true);
+    let totalFrames = 0;
+
+    try {
+      const { extractFrames, uploadFrames } = await import("@/lib/frame-extractor");
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Nie zalogowano");
+
+      for (let i = 0; i < segsWithUrl.length; i++) {
+        if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
+        const seg = segsWithUrl[i];
+        setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: "loading", percent: 0 });
+
+        const res = await fetch(seg.signedUrl!);
+        const videoBlob = await res.blob();
+        if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
+        setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: "extracting", percent: 0 });
+        const frames = await extractFrames(videoBlob, batchInterval, 50, (info) => {
+          setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: info.phase, percent: info.percent });
+        }, ac.signal);
+
+        if (frames.length > 0) {
+          const segStem = seg.name.replace(/\.[^.]+$/, "");
+          await uploadFrames(supabase, user.id, segStem, frames, (info) => {
+            setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: info.phase, percent: info.percent });
+          }, ac.signal);
+          totalFrames += frames.length;
+        }
+      }
+
+      toast.success(`Wygenerowano ${totalFrames} klatek z ${segsWithUrl.length} segmentów`);
+      onFramesGenerated?.();
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        toast.info("Generowanie klatek anulowane");
+      } else {
+        toast.error("Błąd: " + (err.message || "nieznany"));
+      }
+    } finally {
+      batchAbortRef.current = null;
+      setBatchGenerating(false);
+      setBatchProgress(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
@@ -147,6 +206,12 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
 
   if (segments.length === 0) return null;
 
+  const phaseLabels: Record<string, string> = {
+    loading: "Pobieranie",
+    extracting: "Wyodrębnianie",
+    uploading: "Przesyłanie",
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -157,20 +222,85 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
           {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           Segmenty ({segments.length})
         </button>
-        {expanded && (
-          <button
-            onClick={handleDeleteAll}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-            title="Usuń wszystkie segmenty"
-          >
-            <Trash2 className="w-3 h-3" />
-            Usuń wszystkie
-          </button>
+        {expanded && !batchGenerating && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDeleteAll}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+              title="Usuń wszystkie segmenty"
+            >
+              <Trash2 className="w-3 h-3" />
+              Usuń wszystkie
+            </button>
+          </div>
         )}
       </div>
 
       {expanded && (
         <div className="space-y-2">
+          {/* Batch frame generation */}
+          <div className="border border-border rounded-md p-3 bg-muted/20 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Images className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <span className="text-[11px] font-medium text-foreground">Klatki ze wszystkich segmentów</span>
+              <span className="text-[10px] text-muted-foreground">co</span>
+              <input
+                type="number"
+                min={1}
+                max={300}
+                value={batchInterval}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value);
+                  if (v >= 1 && v <= 300) setBatchInterval(v);
+                }}
+                disabled={batchGenerating}
+                className="w-14 text-xs bg-muted/50 border border-border rounded px-2 py-0.5 text-foreground text-center"
+              />
+              <span className="text-[10px] text-muted-foreground">sek</span>
+            </div>
+
+            {batchGenerating && batchProgress && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>
+                    Segment {batchProgress.segIdx}/{batchProgress.total} — {phaseLabels[batchProgress.phase] || batchProgress.phase}
+                  </span>
+                  <span className="font-mono">{batchProgress.percent}%</span>
+                </div>
+                <Progress value={((batchProgress.segIdx - 1) / batchProgress.total) * 100 + (batchProgress.percent / batchProgress.total)} className="h-1.5" />
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBatchFrames}
+                disabled={batchGenerating}
+                className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+              >
+                {batchGenerating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Przetwarzanie…
+                  </>
+                ) : (
+                  <>
+                    <Images className="w-3.5 h-3.5" />
+                    Generuj klatki ze wszystkich
+                  </>
+                )}
+              </button>
+              {batchGenerating && (
+                <button
+                  onClick={() => batchAbortRef.current?.abort()}
+                  className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                  Anuluj
+                </button>
+              )}
+            </div>
+          </div>
+
           {segments.map((seg, idx) => (
             <div key={seg.name} className="border border-border rounded-md overflow-hidden">
               {/* Segment header */}
