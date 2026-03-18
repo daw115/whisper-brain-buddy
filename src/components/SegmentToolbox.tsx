@@ -77,7 +77,7 @@ export default function SegmentToolbox({
   const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const [transcribeMode, setTranscribeMode] = useState<"online" | "offline">("online");
   const [chunkMB, setChunkMB] = useState(20);
-  const [maxSegmentMB, setMaxSegmentMB] = useState(100);
+  const [maxMp3MB, setMaxMp3MB] = useState(20);
   const [frameInterval, setFrameInterval] = useState(30);
   const [expandedFrameIdx, setExpandedFrameIdx] = useState<number | null>(null);
   const [cachedFrames, setCachedFrames] = useState<{ base64: string; timestamp: string }[]>([]);
@@ -251,9 +251,9 @@ export default function SegmentToolbox({
 
         const mp3Stem = seg.name.replace(/\.[^.]+$/, "");
 
-        if (mp3SizeMB > maxSegmentMB) {
+        if (mp3SizeMB > maxMp3MB) {
           // Auto-split large MP3 into sub-segments
-          toast.loading(`Segment ${i + 1} = ${mp3SizeMB.toFixed(0)} MB → dzielenie na ≤${maxSegmentMB} MB…`, { id: "extract-mp3" });
+          toast.loading(`Segment ${i + 1} = ${mp3SizeMB.toFixed(0)} MB → dzielenie na ≤${maxMp3MB} MB…`, { id: "extract-mp3" });
           await ffmpeg.writeFile("autosplit_input.mp3", mp3Data);
 
           // Estimate duration
@@ -266,7 +266,7 @@ export default function SegmentToolbox({
           await ffmpeg.exec(["-i", "autosplit_input.mp3", "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
           if (durationSec <= 0) durationSec = Math.max(60, mp3Blob.size / (8 * 1024));
 
-          const chunkBytes = maxSegmentMB * 1024 * 1024;
+          const chunkBytes = maxMp3MB * 1024 * 1024;
           const bytesPerSec = mp3Blob.size / durationSec;
           const segDuration = Math.max(10, Math.floor(chunkBytes / bytesPerSec));
 
@@ -674,11 +674,11 @@ export default function SegmentToolbox({
             <span>sek</span>
           </div>
           <div className="flex items-center gap-2">
-            <span>Max segment:</span>
+            <span>Max MP3:</span>
             <div className="flex gap-1">
-              {[25, 50, 100, 200].map(v => (
-                <button key={v} onClick={() => setMaxSegmentMB(v)} disabled={busy}
-                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${maxSegmentMB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+              {[5, 10, 20].map(v => (
+                <button key={v} onClick={() => setMaxMp3MB(v)} disabled={busy}
+                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${maxMp3MB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
                 >{v} MB</button>
               ))}
             </div>
