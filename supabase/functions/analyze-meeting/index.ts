@@ -141,54 +141,82 @@ serve(async (req) => {
     const hasTranscript = transcriptText.length > 0;
     const hasSlides = frames.length > 0;
 
-    console.log(`Analysis input: transcript=${hasTranscript} (${sorted.length} lines, ${transcriptText.length} chars), slides=${hasSlides} (${frames.length})`);
+    // 3b. Load slide-transcript if available (from transcribe-slides function)
+    let slideTranscriptText = "";
+    const { data: slideAnalysis } = await supabase
+      .from("meeting_analyses")
+      .select("analysis_json")
+      .eq("meeting_id", meetingId)
+      .eq("source", "slide-transcript")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (slideAnalysis?.analysis_json) {
+      const stData = slideAnalysis.analysis_json as any;
+      if (stData.slide_transcript) {
+        slideTranscriptText = stData.slide_transcript;
+      }
+    }
+    const hasSlideTranscript = slideTranscriptText.length > 0;
+
+    console.log(`Analysis input: audio_transcript=${hasTranscript} (${sorted.length} lines), slide_transcript=${hasSlideTranscript} (${slideTranscriptText.length} chars), slides=${hasSlides} (${frames.length})`);
 
     // 4. Build multimodal content — integrated chronological analysis
     const contentParts: any[] = [];
+
+    // Build data sources section
+    const dataSources = [];
+    if (hasTranscript) dataSources.push(`Transkrypt audio: ${sorted.length} linii z timestampami`);
+    if (hasSlideTranscript) dataSources.push(`Transkrypcja wizualna slajdów (OCR): ${slideTranscriptText.length} znaków — odczytana treść każdego slajdu`);
+    if (hasSlides) dataSources.push(`${frames.length} obrazów slajdów prezentacji z timestampami`);
 
     contentParts.push({
       type: "text",
       text: `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
 
 ## DANE WEJŚCIOWE
-${hasTranscript ? `- Transkrypt audio: ${sorted.length} linii z timestampami` : "- Brak transkryptu audio"}
-${hasSlides ? `- ${frames.length} slajdów prezentacji z timestampami (każdy oznaczony @ MM:SS)` : "- Brak slajdów"}
+${dataSources.map(s => `- ${s}`).join("\n")}
 
-## KLUCZOWE ZADANIE: AGREGACJA CHRONOLOGICZNA
+## KLUCZOWE ZADANIE: AGREGACJA DWÓCH TRANSKRYPCJI
 
-Musisz stworzyć **zintegrowany zapis spotkania** który łączy transkrypcję audio ze slajdami w jedną spójną, chronologiczną narrację.
+${hasTranscript && hasSlideTranscript ? `Masz DWA źródła transkrypcji:
+1. **Transkrypt AUDIO** — co mówili uczestnicy (może zawierać błędy rozpoznawania mowy)
+2. **Transkrypt WIZUALNY** — treść odczytana z slajdów prezentacji (OCR z klatek)
 
-### Jak to zrobić:
+### MUSISZ:
+- **POŁĄCZYĆ** oba źródła w jedną, najlepszą, zintegrowaną transkrypcję
+- Użyć timestampów aby dopasować slajdy do odpowiednich momentów rozmowy
+- Wstawić treść slajdów (📊 SLAJD:) w chronologicznie właściwe miejsca dialogu
+- Jeśli audio i slajd mówią o tym samym — zachować obie wersje (dialog + dane ze slajdu)
+- Korekta błędów: jeśli audio źle rozpoznało nazwę/liczbę, a slajd ma poprawną wersję — użyj slajdu` : hasTranscript ? `Masz transkrypt audio. Połącz go ze slajdami wizualnymi.` : hasSlideTranscript ? `Masz transkrypcję wizualną slajdów. Użyj jej jako główne źródło treści.` : `Przeanalizuj dostępne slajdy.`}
 
-1. **ODCZYTAJ każdy slajd** — wyciągnij CAŁĄ treść: tytuły, nagłówki, bullet pointy, dane liczbowe, wykresy, tabele, adnotacje.
+### Format integrated_transcript:
+\`\`\`
+[0:00] Jan Kowalski: Dzień dobry, zaczynamy spotkanie...
+[0:45] Anna Nowak: Przejdźmy do prezentacji.
+[1:00] 📊 SLAJD: "Agenda spotkania" — 1. Wyniki Q1, 2. Plan Q2, 3. Budżet
+[1:15] Anna Nowak: Jak widzicie na slajdzie, mamy trzy punkty...
+[3:00] 📊 SLAJD: "Wyniki Q1" — Przychód: 2.5M PLN (+15%), Koszty: 1.8M PLN
+[3:10] Jan Kowalski: Wzrost o 15% to lepiej niż planowaliśmy...
+\`\`\`
 
-2. **PORÓWNAJ transkrypt z slajdami** — znajdź gdzie w rozmowie omawiano dany slajd:
-   - Dopasuj po timestampach (slajd @ 3:00 → dialog wokół [3:00])
-   - Dopasuj po kontekście (jeśli slajd pokazuje "Budżet Q1" a ktoś mówi o budżecie)
-
-3. **STWÓRZ ZINTEGROWANY ZAPIS** (pole "integrated_transcript"):
-   Połącz dialog z slajdami chronologicznie. Format:
-   \`\`\`
-   [0:00] Jan Kowalski: Dzień dobry, zaczynamy spotkanie...
-   [0:45] Anna Nowak: Przejdźmy do prezentacji.
-   [1:00] 📊 SLAJD: "Agenda spotkania" — 1. Wyniki Q1, 2. Plan Q2, 3. Budżet
-   [1:15] Anna Nowak: Jak widzicie na slajdzie, mamy trzy punkty do omówienia...
-   [3:00] 📊 SLAJD: "Wyniki Q1" — Przychód: 2.5M PLN (+15%), Koszty: 1.8M PLN, EBITDA: 700K PLN
-   [3:10] Jan Kowalski: Wzrost o 15% to lepiej niż planowaliśmy...
-   \`\`\`
-
-4. **IDENTYFIKUJ ROZBIEŻNOŚCI** — co mówili uczestnicy INNEGO niż jest na slajdach?
-   Np. slajd pokazuje "plan: 2M" ale ktoś mówi "realnie to będzie 1.8M"
-
-5. **WYCIĄGNIJ kontekst ukryty** — informacje z dialogu których NIE MA na slajdach
-   (uwagi prywatne, wątpliwości, decyzje ustne, background knowledge)
+### IDENTYFIKUJ:
+- **Rozbieżności** — co mówili innego niż jest na slajdach
+- **Kontekst ukryty** — informacje z dialogu których NIE MA na slajdach
+- **Korekty** — gdzie slajd poprawia błędy rozpoznawania mowy
 
 ${hasTranscript ? `## TRANSKRYPT AUDIO:
 ---
 ${transcriptText.slice(0, 15000)}
 ---` : "## (Brak transkryptu audio)"}
 
-${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności chronologicznej. Odczytaj KAŻDY dokładnie:` : ""}`,
+${hasSlideTranscript ? `## TRANSKRYPT WIZUALNY SLAJDÓW (OCR):
+---
+${slideTranscriptText.slice(0, 10000)}
+---` : ""}
+
+${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności chronologicznej:` : ""}`,
     });
 
     for (const frame of frames) {
