@@ -227,7 +227,7 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
       });
     }
 
-    if (!hasTranscript && !hasSlides) {
+    if (!hasTranscript && !hasSlides && !hasSlideTranscript) {
       return new Response(JSON.stringify({ error: "Brak danych do analizy — dodaj transkrypt lub wygeneruj klatki" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
