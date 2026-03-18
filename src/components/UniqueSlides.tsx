@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import { Images, ChevronDown, ChevronUp } from "lucide-react";
+import { Images, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface AnalysisEntry {
   source: string;
