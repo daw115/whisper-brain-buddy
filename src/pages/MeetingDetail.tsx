@@ -15,6 +15,7 @@ import FrameGallery from "@/components/FrameGallery";
 import RecordingPanel from "@/components/RecordingPanel";
 import SegmentToolbox from "@/components/SegmentToolbox";
 import AIInputPreview from "@/components/AIInputPreview";
+import SlideInsightsPanel from "@/components/SlideInsightsPanel";
 import { toast } from "sonner";
 import { useBuildKnowledge } from "@/hooks/use-knowledge";
 
@@ -369,6 +370,13 @@ export default function MeetingDetail() {
             <TranscriptView lines={meeting.transcript_lines} meetingTitle={meeting.title} />
           ) : (
             <p className="text-sm text-muted-foreground italic">No transcript available.</p>
+          )}
+
+          {/* Slide Insights from AI analysis */}
+          {analyses.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-border">
+              <SlideInsightsPanel analyses={analyses} />
+            </div>
           )}
 
           {/* AI Input Preview */}
