@@ -24,7 +24,7 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-type SpeechRecognitionInstance = InstanceType<typeof window.SpeechRecognition> & any;
+type SpeechRecognitionInstance = any;
 
 // Check browser support
 function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
