@@ -38,7 +38,8 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
   const [transcribePhase, setTranscribePhase] = useState("");
   const ffmpegRef = useRef<any>(null);
 
-  const stem = recordingFilename.replace(/\.[^.]+$/, "");
+  // Strip extension and any trailing _partN suffix to get the base stem
+  const stem = recordingFilename.replace(/\.[^.]+$/, "").replace(/_part\d+$/, "");
 
   useEffect(() => {
     loadSegments();

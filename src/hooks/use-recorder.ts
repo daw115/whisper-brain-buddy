@@ -185,13 +185,14 @@ export function useRecorder(): RecordingState {
       // Normal stop (user pressed stop)
       const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
       const segIdx = segmentIndexRef.current;
+      const hadPriorSegments = segIdx > 0;
       chunksRef.current = [];
       cleanup();
 
       if (blob.size === 0) return;
 
       const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
-      const filename = segIdx > 0
+      const filename = hadPriorSegments
         ? `${baseFilenameRef.current}_part${segIdx + 1}.webm`
         : `${baseFilenameRef.current}.webm`;
 
@@ -207,7 +208,9 @@ export function useRecorder(): RecordingState {
           description: filename,
           duration: 5000,
         });
-        setLastRecording({ blob, filename, url: signedUrl });
+        // Use base filename for meeting record so RecordingSegments can find all parts
+        const meetingFilename = hadPriorSegments ? `${baseFilenameRef.current}.webm` : filename;
+        setLastRecording({ blob, filename: meetingFilename, url: signedUrl });
 
         // Extract frames in background
         toast.loading("Wyodrębnianie klatek…", { id: "frames" });
@@ -245,7 +248,8 @@ export function useRecorder(): RecordingState {
           description: filename,
           duration: 5000,
         });
-        setLastRecording({ blob, filename, url: null });
+        const meetingFilename2 = hadPriorSegments ? `${baseFilenameRef.current}.webm` : filename;
+        setLastRecording({ blob, filename: meetingFilename2, url: null });
       }
     };
 
