@@ -151,13 +151,22 @@ export default function AIChatPanel({ meetingId, meetingTitle }: AIChatPanelProp
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <Brain className="w-12 h-12 text-muted-foreground/30 mb-4" />
-            <p className="text-sm text-muted-foreground">Ask a question about your meetings.</p>
+            <p className="text-sm text-muted-foreground">
+              {meetingTitle ? `Ask about "${meetingTitle}"` : "Ask a question about your meetings."}
+            </p>
             <div className="flex flex-wrap gap-2 mt-4 max-w-md justify-center">
-              {[
-                "What decisions were made about transformer parameters?",
-                "Summarize all meetings from last week",
-                "List tasks assigned to Dawid",
-              ].map((q) => (
+              {(meetingId
+                ? [
+                    "Summarize this meeting",
+                    "What were the key decisions?",
+                    "List all action items",
+                  ]
+                : [
+                    "What decisions were made about transformer parameters?",
+                    "Summarize all meetings from last week",
+                    "List tasks assigned to Dawid",
+                  ]
+              ).map((q) => (
                 <button
                   key={q}
                   onClick={() => { setInput(q); }}

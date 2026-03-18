@@ -89,10 +89,14 @@ serve(async (req) => {
     const authHeader = req.headers.get("Authorization") || "";
     const meetingContext = await buildMeetingContext(authHeader, meetingId);
 
-    const systemPrompt = `You are Cerebro, an AI meeting intelligence assistant. You have access to the user's real meeting data below.
-Answer questions based on this data. Cite meeting titles and dates when possible. If you can't find relevant info, say so.
+    const scopeNote = meetingId
+      ? "You are focused on ONE specific meeting. Answer questions only about this meeting's data below."
+      : "You have access to the user's meeting database. Cite meeting titles and dates when possible.";
 
-MEETING DATABASE:
+    const systemPrompt = `You are Cerebro, an AI meeting intelligence assistant. ${scopeNote}
+If you can't find relevant info, say so.
+
+MEETING DATA:
 
 ${meetingContext}`;
 
