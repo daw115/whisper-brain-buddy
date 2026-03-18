@@ -139,6 +139,17 @@ ${transcriptLines.length > 0 ? `\nŁącznie: ${transcriptLines.length} linii tra
       : `TRANSKRYPT: Brak automatycznego transkryptu.
 WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
+    const slideTranscriptSection = slideTranscript
+      ? `\nTRANSKRYPCJA WIZUALNA SLAJDÓW (OCR z Gemini):
+---
+${slideTranscript.slice(0, 10000)}
+---
+Powyżej znajduje się odczytana treść slajdów prezentacji z timestampami. Użyj jej do:
+- Weryfikacji/korekty transkryptu audio
+- Uzupełnienia danych liczbowych ze slajdów
+- Połączenia dialogu z odpowiednimi slajdami chronologicznie`
+      : "";
+
     const frameSection = frames.length > 0
       ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji (z nagrania głównego i/lub segmentów).
 Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
