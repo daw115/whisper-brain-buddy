@@ -240,9 +240,19 @@ export default function MeetingDetail() {
                     recordingUrl={recordingUrl}
                     recordingFilename={meeting.recording_filename}
                     recordingSizeBytes={meeting.recording_size_bytes}
+                    onComplete={() => setSegmentsVersion((v) => v + 1)}
                   />
                 </div>
               )}
+
+              {/* Segments viewer */}
+              <div className="mt-3 pt-3 border-t border-border">
+                <RecordingSegments
+                  key={segmentsVersion}
+                  recordingFilename={meeting.recording_filename}
+                  onFramesGenerated={() => setFramesVersion((v) => v + 1)}
+                />
+              </div>
             </>
           )}
 
