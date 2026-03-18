@@ -6,6 +6,7 @@ interface RecordingHUDProps {
   time: number;
   liveTranscript?: string;
   segmentCount?: number;
+  currentSizeMB?: number;
   onStop: () => void;
   onPause: () => void;
   onResume: () => void;
