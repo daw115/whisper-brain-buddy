@@ -248,7 +248,8 @@ export function useRecorder(): RecordingState {
           description: filename,
           duration: 5000,
         });
-        setLastRecording({ blob, filename, url: null });
+        const meetingFilename2 = hadPriorSegments ? `${baseFilenameRef.current}.webm` : filename;
+        setLastRecording({ blob, filename: meetingFilename2, url: null });
       }
     };
 
