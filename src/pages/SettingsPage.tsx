@@ -44,6 +44,7 @@ export default function SettingsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState(CATEGORY_COLORS[0].value);
   const [creatingCategory, setCreatingCategory] = useState(false);
 
   useEffect(() => {
