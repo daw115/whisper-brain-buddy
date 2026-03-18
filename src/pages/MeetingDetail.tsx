@@ -21,6 +21,7 @@ export default function MeetingDetail() {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [framesVersion, setFramesVersion] = useState(0);
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
 
@@ -225,6 +226,7 @@ export default function MeetingDetail() {
                   <FrameRegenerator
                     recordingUrl={recordingUrl}
                     recordingFilename={meeting.recording_filename}
+                    onComplete={() => setFramesVersion((v) => v + 1)}
                   />
                 </div>
               )}
@@ -243,7 +245,7 @@ export default function MeetingDetail() {
 
           {/* ChatGPT Analysis Kit */}
           <div className="mt-6 pt-4 border-t border-border">
-            <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} />
+            <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} framesVersion={framesVersion} />
           </div>
 
           {/* ChatGPT JSON Importer */}

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 interface Props {
   meeting: MeetingWithRelations;
   recordingUrl: string | null;
+  framesVersion?: number;
 }
 
 interface FrameInfo {
@@ -15,7 +16,7 @@ interface FrameInfo {
   timestamp?: string;
 }
 
-export default function AnalysisPromptGenerator({ meeting, recordingUrl }: Props) {
+export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesVersion = 0 }: Props) {
   const [frames, setFrames] = useState<FrameInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -26,7 +27,7 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl }: Props
 
   useEffect(() => {
     loadFrames();
-  }, [meeting.id, meeting.recording_filename]);
+  }, [meeting.id, meeting.recording_filename, framesVersion]);
 
   async function loadFrames() {
     if (!meeting.recording_filename) {
@@ -56,16 +57,20 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl }: Props
         .from("recordings")
         .createSignedUrl(path, 60 * 60);
       if (data?.signedUrl) {
-        const match = file.name.match(/frame_(\d+)/);
-        const num = match ? parseInt(match[1]) : 0;
-        const secs = num * 30;
-        const mins = Math.floor(secs / 60);
-        const s = secs % 60;
-        frameInfos.push({
-          path,
-          url: data.signedUrl,
-          timestamp: `${mins}:${String(s).padStart(2, "0")}`,
-        });
+        // Extract timestamp from filename: frame_0.jpg, frame_1.jpg etc.
+        // or frame_0s.jpg, frame_30s.jpg pattern
+        const matchSec = file.name.match(/frame_(\d+)s/);
+        const matchIdx = file.name.match(/frame_(\d+)/);
+        let timestamp = "0:00";
+        if (matchSec) {
+          const secs = parseInt(matchSec[1]);
+          timestamp = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+        } else if (matchIdx) {
+          // Guess interval from sorted file count & names
+          const num = parseInt(matchIdx[1]);
+          timestamp = `#${num}`;
+        }
+        frameInfos.push({ path, url: data.signedUrl, timestamp });
       }
     }
 
