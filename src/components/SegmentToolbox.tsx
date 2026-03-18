@@ -683,13 +683,8 @@ export default function SegmentToolbox({
         for (const p of parts) await ffmpeg.deleteFile(p.name).catch(() => {});
       } catch {}
 
-      // Optionally delete original oversized segment
-      if (uploaded === parts.length) {
-        await supabase.storage.from("recordings").remove([seg.path]);
-        toast.success(`Podzielono na ${uploaded} części i usunięto oryginał`, { id: "split-video", duration: 5000 });
-      } else {
-        toast.success(`Przesłano ${uploaded}/${parts.length} części`, { id: "split-video", duration: 5000 });
-      }
+      // Don't delete original — keep it until full analysis is saved
+      toast.success(`Podzielono na ${uploaded}/${parts.length} części. Oryginał zachowany.`, { id: "split-video", duration: 5000 });
 
       // Reload segments
       await loadVideoSegments();
