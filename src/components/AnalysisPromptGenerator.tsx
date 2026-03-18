@@ -21,7 +21,9 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
+  const [audioTranscript, setAudioTranscript] = useState<string | null>(null);
+  const [ocrCaptions, setOcrCaptions] = useState<string | null>(null);
+  const [slideDescriptions, setSlideDescriptions] = useState<string | null>(null);
   const [uniqueFrames, setUniqueFrames] = useState<FrameInfo[]>([]);
   const [showAllFrames, setShowAllFrames] = useState(false);
 
@@ -31,27 +33,58 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
 
   async function loadData() {
     setLoading(true);
-    await Promise.all([loadIntegratedTranscript(), loadUniqueFrames()]);
+    await Promise.all([loadAudioTranscript(), loadOcrCaptions(), loadSlideDescriptions(), loadUniqueFrames()]);
     setLoading(false);
   }
 
-  async function loadIntegratedTranscript() {
+  async function loadAudioTranscript() {
     try {
-      for (const src of ["merged", "gemini"]) {
-        const { data } = await supabase
-          .from("meeting_analyses")
-          .select("analysis_json")
-          .eq("meeting_id", meeting.id)
-          .eq("source", src)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (data?.analysis_json) {
-          const json = data.analysis_json as any;
-          if (json.conversation_transcript || json.integrated_transcript) {
-            setIntegratedTranscript(json.conversation_transcript || json.integrated_transcript);
-            return;
-          }
+      const { data } = await supabase
+        .from("transcript_lines")
+        .select("timestamp, speaker, text, line_order")
+        .eq("meeting_id", meeting.id)
+        .order("line_order", { ascending: true });
+      if (data && data.length > 0) {
+        setAudioTranscript(data.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n"));
+      }
+    } catch {}
+  }
+
+  async function loadOcrCaptions() {
+    try {
+      const { data } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meeting.id)
+        .eq("source", "captions-ocr")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.analysis_json) {
+        const json = data.analysis_json as any;
+        const entries = json.entries || json.captions || [];
+        if (entries.length > 0) {
+          setOcrCaptions(entries.map((e: any) => `[${e.timestamp}] ${e.speaker || "?"}: ${e.text}`).join("\n"));
+        }
+      }
+    } catch {}
+  }
+
+  async function loadSlideDescriptions() {
+    try {
+      const { data } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meeting.id)
+        .eq("source", "slide-descriptions")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.analysis_json) {
+        const json = data.analysis_json as any;
+        const slides = json.slides || json.descriptions || [];
+        if (slides.length > 0) {
+          setSlideDescriptions(slides.map((s: any) => `📊 [${s.timestamp || "?"}] "${s.title || "Slajd"}" — ${s.description || s.content || ""}`).join("\n\n"));
         }
       }
     } catch {}
