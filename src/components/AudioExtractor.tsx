@@ -434,6 +434,7 @@ export default function AudioExtractor({
 
     let allLines: { timestamp: string; speaker: string; text: string }[] = [];
     let globalLineOrder = 0;
+    let cumulativeOffsetSec = 0;
 
     // Load Whisper model once if offline mode
     let transcriber: any = null;

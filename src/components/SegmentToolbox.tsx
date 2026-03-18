@@ -388,6 +388,8 @@ export default function SegmentToolbox({
 
     let globalLineOrder = 0;
     let allLines: { timestamp: string; speaker: string; text: string }[] = [];
+    let cumulativeOffsetSec = 0;
+    let transcriber: any = null;
     let transcriber: any = null;
 
     if (transcribeMode === "offline") {
