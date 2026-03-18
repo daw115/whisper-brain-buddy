@@ -387,12 +387,15 @@ Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych sc
     if (selectedMode === "describe-slides") {
       console.log(`Step 5: Describe unique slides batch offset=${batchOffset} size=${batchSize}...`);
 
+      // Check pdf-slides first (user-uploaded PDF), then fall back to crop-split (frame dedup)
+      const pdfData = await loadLatest("pdf-slides") as any;
       const cropData = await loadLatest("crop-split") as any;
-      if (!cropData?.unique_slides?.length) {
-        throw { status: 400, message: "Run crop-split first" };
+      const slideSource = pdfData?.unique_slides?.length ? pdfData : cropData;
+      if (!slideSource?.unique_slides?.length) {
+        throw { status: 400, message: "Upload a PDF or run crop-split first" };
       }
 
-      const slides = cropData.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
+      const slides = slideSource.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
       const currentBatchSize = Math.max(1, Math.min(batchSize, 8));
       const currentBatch = slides.slice(batchOffset, batchOffset + currentBatchSize);
       const previousResult = batchOffset > 0 ? await loadLatest("slide-descriptions") as any : null;
