@@ -7,7 +7,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-async function buildMeetingContext(authHeader: string): Promise<string> {
+async function buildMeetingContext(authHeader: string, meetingId?: string): Promise<string> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
@@ -15,11 +15,18 @@ async function buildMeetingContext(authHeader: string): Promise<string> {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const { data: meetings, error } = await supabase
+  let query = supabase
     .from("meetings")
     .select("*, meeting_participants(*), action_items(*), decisions(*), transcript_lines(*)")
-    .order("date", { ascending: false })
-    .limit(50);
+    .order("date", { ascending: false });
+
+  if (meetingId) {
+    query = query.eq("id", meetingId);
+  } else {
+    query = query.limit(50);
+  }
+
+  const { data: meetings, error } = await query;
 
   if (error || !meetings?.length) {
     return "No meeting data available yet. The user hasn't recorded any meetings.";
