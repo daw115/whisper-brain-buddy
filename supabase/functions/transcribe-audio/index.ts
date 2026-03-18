@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64, mimeType = "audio/mpeg", language = "pl", frames = [], segmentOffsetSeconds = 0 } = await req.json();
+    const { audioBase64, mimeType = "audio/mpeg", language = "pl", frames = [] } = await req.json();
 
     if (!audioBase64) {
       return new Response(JSON.stringify({ error: "audioBase64 is required" }), {
@@ -22,38 +22,8 @@ serve(async (req) => {
     }
 
     // frames: optional array of { base64: string, timestamp: string }
-    // Deduplicate frames by content hash
-    function quickImageHash(base64: string): string {
-      let hash = 0;
-      const step = Math.max(1, Math.floor(base64.length / 200));
-      for (let i = 0; i < base64.length; i += step) {
-        hash = ((hash << 5) - hash + base64.charCodeAt(i)) | 0;
-      }
-      return hash.toString(36);
-    }
-
-    function timestampToSeconds(ts: string): number {
-      const parts = ts.split(":").map(Number);
-      if (parts.length === 2) return parts[0] * 60 + parts[1];
-      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-      return 0;
-    }
-
-    let uniqueFrames: { base64: string; timestamp: string; seconds: number }[] = [];
-    if (Array.isArray(frames) && frames.length > 0) {
-      const seen = new Set<string>();
-      for (const f of frames) {
-        const hash = quickImageHash(f.base64);
-        if (seen.has(hash)) continue;
-        seen.add(hash);
-        const secs = timestampToSeconds(f.timestamp || "0:00");
-        uniqueFrames.push({ ...f, seconds: secs });
-      }
-      uniqueFrames.sort((a, b) => a.seconds - b.seconds);
-    }
-
-    const hasFrames = uniqueFrames.length > 0;
-    console.log(`Frames: ${frames?.length || 0} provided → ${uniqueFrames.length} unique`);
+    const hasFrames = Array.isArray(frames) && frames.length > 0;
+    console.log(`Frames provided: ${hasFrames ? frames.length : 0}`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
@@ -71,9 +41,6 @@ serve(async (req) => {
     }
 
     const languageName = language === "pl" ? "polski" : language === "en" ? "angielski" : language;
-    const offsetNote = segmentOffsetSeconds > 0
-      ? `\n- Ten segment zaczyna się od ${Math.floor(segmentOffsetSeconds / 60)}:${String(Math.floor(segmentOffsetSeconds % 60)).padStart(2, "0")} oryginalnego nagrania — dostosuj znaczniki czasowe`
-      : "";
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -90,7 +57,7 @@ serve(async (req) => {
               const parts: any[] = [];
 
               const frameNote = hasFrames
-                ? `\n- Masz ${uniqueFrames.length} unikalnych klatek/slajdów z prezentacji — są wstawione w odpowiednim miejscu czasowym, użyj ich jako kontekstu wizualnego`
+                ? `\n- Masz również ${frames.length} klatek/slajdów z prezentacji — użyj ich jako kontekstu wizualnego do lepszego zrozumienia treści`
                 : "";
 
               parts.push({
@@ -104,7 +71,7 @@ Zasady:
 - Dodaj znaczniki czasowe co ~30 sekund w formacie [MM:SS]
 - Zachowaj naturalną interpunkcję
 - Oznacz niezrozumiałe fragmenty jako [niezrozumiałe]
-- Jeśli są dźwięki tła, zaznacz je w nawiasach kwadratowych np. [śmiech], [cisza]${frameNote}${offsetNote}
+- Jeśli są dźwięki tła, zaznacz je w nawiasach kwadratowych np. [śmiech], [cisza]${frameNote}
 
 Zwróć transkrypcję jako strukturyzowane dane.`,
               });
@@ -115,10 +82,10 @@ Zwróć transkrypcję jako strukturyzowane dane.`,
                 image_url: { url: `data:${mimeType};base64,${audioBase64}` },
               });
 
-              // Add frame images interleaved by timestamp
+              // Add frame images as visual context
               if (hasFrames) {
-                for (const frame of uniqueFrames.slice(0, 10)) {
-                  parts.push({ type: "text", text: `--- Slajd widoczny @ ${frame.timestamp} (prezentacja) ---` });
+                for (const frame of frames.slice(0, 10)) {
+                  parts.push({ type: "text", text: `--- Slajd @ ${frame.timestamp || "?"} ---` });
                   parts.push({
                     type: "image_url",
                     image_url: { url: `data:image/jpeg;base64,${frame.base64}` },
