@@ -44,91 +44,83 @@ serve(async (req) => {
 
     console.log(`Meeting: ${meeting.title}, recording: ${meeting.recording_filename}, user: ${meeting.user_id}`);
 
-    // 2. Get frames from storage + deduplicate
+    // 2. Load unique slides from meeting_analyses (curated by transcribe-slides)
     const frames: { base64: string; timestamp: string; mimeType: string }[] = [];
-    if (meeting.recording_filename) {
-      const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
-      console.log(`Looking for frames with stem: "${stem}"`);
+    
+    const { data: uniqueFramesAnalysis } = await supabase
+      .from("meeting_analyses")
+      .select("analysis_json")
+      .eq("meeting_id", meetingId)
+      .eq("source", "unique-frames")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      // Collect frames from main + segment directories
+    const uniqueFramePaths = (uniqueFramesAnalysis?.analysis_json as any)?.frames as
+      { path: string; timestamp: number; timestamp_formatted: string }[] | undefined;
+
+    if (uniqueFramePaths && uniqueFramePaths.length > 0) {
+      console.log(`Loading ${uniqueFramePaths.length} unique slides from analysis`);
+      for (const ff of uniqueFramePaths.slice(0, 25)) {
+        const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
+        if (!data) continue;
+        const bytes = new Uint8Array(await data.arrayBuffer());
+        const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
+        const isJpeg = ff.path.match(/\.jpe?g$/i);
+        const mimeType = isJpeg ? "image/jpeg" : "image/png";
+        frames.push({ base64, mimeType, timestamp: ff.timestamp_formatted });
+      }
+      console.log(`Loaded ${frames.length} unique slides for Gemini`);
+    } else if (meeting.recording_filename) {
+      // Fallback: scan storage directly if no unique-frames analysis exists
+      console.log("No unique-frames analysis found — scanning storage directly");
+      const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
       const dirPrefixes = [`${meeting.user_id}/frames/${stem}`];
-      
-      const { data: allDirs, error: dirErr } = await supabaseAdmin.storage
-        .from("recordings")
-        .list(`${meeting.user_id}/frames`);
-      
-      console.log(`Dirs in frames/: ${allDirs?.length ?? 0} entries, error: ${dirErr?.message ?? 'none'}`);
-      
+
+      const { data: allDirs } = await supabaseAdmin.storage
+        .from("recordings").list(`${meeting.user_id}/frames`);
+
       if (allDirs) {
         for (const d of allDirs) {
-          console.log(`  dir entry: name="${d.name}", id=${d.id}`);
-          // FIX: Don't require d.id — folders in Supabase Storage have id=null
           if (d.name.startsWith(stem + "_part")) {
             dirPrefixes.push(`${meeting.user_id}/frames/${d.name}`);
           }
         }
       }
 
-      console.log(`Searching ${dirPrefixes.length} frame directories: ${dirPrefixes.map(p => p.split('/').pop()).join(', ')}`);
-
       const allFrameFiles: { path: string; timestamp: number }[] = [];
       for (const prefix of dirPrefixes) {
-        const { data: files, error: listErr } = await supabaseAdmin.storage
+        const { data: files } = await supabaseAdmin.storage
           .from("recordings")
           .list(prefix, { limit: 100, sortBy: { column: "name", order: "asc" } });
-        
-        console.log(`  ${prefix.split('/').pop()}: ${files?.length ?? 0} files, error: ${listErr?.message ?? 'none'}`);
-        
         if (files) {
           for (const file of files) {
             if (!file.name.match(/\.(jpg|jpeg|png)$/i)) continue;
             const match = file.name.match(/frame_(\d+)/);
-            const ts = match ? parseInt(match[1]) : 0;
-            allFrameFiles.push({ path: `${prefix}/${file.name}`, timestamp: ts });
+            allFrameFiles.push({ path: `${prefix}/${file.name}`, timestamp: match ? parseInt(match[1]) : 0 });
           }
         }
       }
-      
       allFrameFiles.sort((a, b) => a.timestamp - b.timestamp);
-      console.log(`Found ${allFrameFiles.length} total frame files`);
 
-      // Download and deduplicate frames using simple hash
       const seenHashes = new Set<string>();
       for (const ff of allFrameFiles.slice(0, 30)) {
-        const { data } = await supabaseAdmin.storage
-          .from("recordings")
-          .download(ff.path);
-        if (!data) {
-          console.log(`  Failed to download: ${ff.path}`);
-          continue;
-        }
-
-        const arrayBuffer = await data.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-
-        // Simple perceptual hash on first 2KB
+        const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
+        if (!data) continue;
+        const bytes = new Uint8Array(await data.arrayBuffer());
         let hash = 0;
         const slice = bytes.slice(0, 2048);
-        for (let j = 0; j < slice.length; j += 4) {
-          hash = ((hash << 5) - hash + slice[j]) | 0;
-        }
-        const hashStr = hash.toString(36);
-        if (seenHashes.has(hashStr)) continue;
-        seenHashes.add(hashStr);
-
+        for (let j = 0; j < slice.length; j += 4) { hash = ((hash << 5) - hash + slice[j]) | 0; }
+        if (seenHashes.has(hash.toString(36))) continue;
+        seenHashes.add(hash.toString(36));
         const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
         const isJpeg = ff.path.match(/\.jpe?g$/i);
-        const mimeType = isJpeg ? "image/jpeg" : "image/png";
-        const secs = ff.timestamp;
-        const mins = Math.floor(secs / 60);
-        const s = secs % 60;
-        frames.push({ base64, mimeType, timestamp: `${mins}:${String(s).padStart(2, "0")}` });
-
+        frames.push({ base64, mimeType: isJpeg ? "image/jpeg" : "image/png", timestamp: `${Math.floor(ff.timestamp / 60)}:${String(ff.timestamp % 60).padStart(2, "0")}` });
         if (frames.length >= 20) break;
       }
-      console.log(`Loaded ${frames.length} unique frames (deduped from ${allFrameFiles.length})`);
+      console.log(`Fallback: loaded ${frames.length} frames`);
     } else {
-      console.log("No recording_filename — skipping frame loading");
+      console.log("No recording — skipping frame loading");
     }
 
     // 3. Build transcript
