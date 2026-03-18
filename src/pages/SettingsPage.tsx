@@ -66,7 +66,7 @@ export default function SettingsPage() {
     setLoadingCategories(true);
     const { data, error } = await supabase
       .from("categories")
-      .select("id, name")
+      .select("id, name, color")
       .order("name");
     if (!error) setCategories(data || []);
     setLoadingCategories(false);
