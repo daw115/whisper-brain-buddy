@@ -21,7 +21,9 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
+  const [audioTranscript, setAudioTranscript] = useState<string | null>(null);
+  const [ocrCaptions, setOcrCaptions] = useState<string | null>(null);
+  const [slideDescriptions, setSlideDescriptions] = useState<string | null>(null);
   const [uniqueFrames, setUniqueFrames] = useState<FrameInfo[]>([]);
   const [showAllFrames, setShowAllFrames] = useState(false);
 
@@ -31,27 +33,58 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
 
   async function loadData() {
     setLoading(true);
-    await Promise.all([loadIntegratedTranscript(), loadUniqueFrames()]);
+    await Promise.all([loadAudioTranscript(), loadOcrCaptions(), loadSlideDescriptions(), loadUniqueFrames()]);
     setLoading(false);
   }
 
-  async function loadIntegratedTranscript() {
+  async function loadAudioTranscript() {
     try {
-      for (const src of ["merged", "gemini"]) {
-        const { data } = await supabase
-          .from("meeting_analyses")
-          .select("analysis_json")
-          .eq("meeting_id", meeting.id)
-          .eq("source", src)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (data?.analysis_json) {
-          const json = data.analysis_json as any;
-          if (json.conversation_transcript || json.integrated_transcript) {
-            setIntegratedTranscript(json.conversation_transcript || json.integrated_transcript);
-            return;
-          }
+      const { data } = await supabase
+        .from("transcript_lines")
+        .select("timestamp, speaker, text, line_order")
+        .eq("meeting_id", meeting.id)
+        .order("line_order", { ascending: true });
+      if (data && data.length > 0) {
+        setAudioTranscript(data.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n"));
+      }
+    } catch {}
+  }
+
+  async function loadOcrCaptions() {
+    try {
+      const { data } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meeting.id)
+        .eq("source", "captions-ocr")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.analysis_json) {
+        const json = data.analysis_json as any;
+        const entries = json.entries || json.captions || [];
+        if (entries.length > 0) {
+          setOcrCaptions(entries.map((e: any) => `[${e.timestamp}] ${e.speaker || "?"}: ${e.text}`).join("\n"));
+        }
+      }
+    } catch {}
+  }
+
+  async function loadSlideDescriptions() {
+    try {
+      const { data } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meeting.id)
+        .eq("source", "slide-descriptions")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.analysis_json) {
+        const json = data.analysis_json as any;
+        const slides = json.slides || json.descriptions || [];
+        if (slides.length > 0) {
+          setSlideDescriptions(slides.map((s: any) => `📊 [${s.timestamp || "?"}] "${s.title || "Slajd"}" — ${s.description || s.content || ""}`).join("\n\n"));
         }
       }
     } catch {}
@@ -96,46 +129,69 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   }
 
   function buildPrompt(): string {
-    const hasIntegrated = !!integratedTranscript;
+    const hasAudio = !!audioTranscript;
+    const hasOcr = !!ocrCaptions;
+    const hasSlideDesc = !!slideDescriptions;
 
     return `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
 
 ## DANE WEJŚCIOWE
-${hasIntegrated ? "- Zagregowana transkrypcja chronologiczna (dialogi uczestników połączone z audio przez AI)" : "- Brak zagregowanej transkrypcji — przeanalizuj załączone materiały"}
-${uniqueFrames.length > 0 ? `- ${uniqueFrames.length} obrazów slajdów prezentacji (unikalne klatki)` : ""}
+${hasAudio ? `- Transkrypt AUDIO (Whisper STT) — pełna ~50-minutowa rozmowa z timestampami` : "- Brak transkryptu audio"}
+${hasOcr ? `- Dialogi OCR — odczytane z paska live captions (z IMIONAMI mówców)` : ""}
+${hasSlideDesc ? `- Opisy slajdów prezentacji z timestampami` : ""}
+${uniqueFrames.length > 0 ? `- ${uniqueFrames.length} obrazów slajdów prezentacji (unikalne klatki w archiwum ZIP)` : ""}
 
-${hasIntegrated ? `## ZAGREGOWANA TRANSKRYPCJA
-Poniższa transkrypcja łączy dialogi uczestników (odczytane z napisów live captions) z transkryptem audio w kolejności chronologicznej.
+## GŁÓWNE ZADANIE: AGREGACJA TRANSKRYPCJI + ANALIZA
 
+Musisz wykonać dwa zadania:
+
+### ZADANIE 1: ZAGREGOWANA TRANSKRYPCJA ROZMOWY (conversation_transcript)
+Idź chronologicznie przez CAŁY transkrypt audio — KAŻDA linia musi trafić do wyniku.
+Dla każdej linii:
+1. **Identyfikuj mówcę** — znajdź odpowiednik w OCR (±30s tolerancji) i użyj IMIENIA mówcy zamiast "Mówca"/"unknown"/"Speaker"
+2. **Popraw błędy** — jeśli OCR ma lepszą/poprawniejszą wersję słowa lub frazy, użyj jej
+3. **Zachowaj PEŁNĄ długość** — NIE skracaj, NIE pomijaj, NIE streszczaj. Cała ~50-minutowa rozmowa musi być w wyniku
+4. **NIE generuj nowych wypowiedzi** — tylko koryguj istniejące
+5. **NIE wstawiaj slajdów** w tej sekcji — slajdy idą w sekcji 2
+
+Format linii: [MM:SS] Imię: wypowiedź
+
+### ZADANIE 2: SLAJDY I ICH PODSUMOWANIA (slides_section)
+Pod transkrypcją, umieść sekcję ze WSZYSTKIMI slajdami.
+Dla każdego slajdu podaj:
+- Timestamp pierwszego pojawienia się
+- Tytuł slajdu
+- Pełny opis treści (bullet pointy, dane, wykresy)
+- Krótkie podsumowanie merytoryczne
+${uniqueFrames.length > 0 ? `- Odczytaj dodatkowe dane z załączonych OBRAZÓW slajdów` : ""}
+
+Format: 📊 [MM:SS] "Tytuł" — opis i podsumowanie
+
+${hasAudio ? `## ŹRÓDŁO 1: TRANSKRYPT AUDIO
 ---
-${integratedTranscript!.slice(0, 25000)}
+${audioTranscript}
+---` : ""}
+
+${hasOcr ? `## ŹRÓDŁO 2: DIALOGI OCR (z live captions)
+---
+${ocrCaptions}
+---` : ""}
+
+${hasSlideDesc ? `## ŹRÓDŁO 3: OPISY SLAJDÓW
+---
+${slideDescriptions}
 ---` : ""}
 
 ${uniqueFrames.length > 0 ? `## ZAŁĄCZONE OBRAZY SLAJDÓW
-W archiwum ZIP znajduje się ${uniqueFrames.length} unikalnych obrazów slajdów prezentacji.
-Dla KAŻDEGO slajdu:
-1. Odczytaj CAŁĄ treść: tytuły, bullet pointy, dane liczbowe, wykresy, tabele
-2. Zweryfikuj dane z transkrypcji — wyłap szczegóły nieujęte w tekście
-3. Powiąż treść slajdu z odpowiednim momentem dialogu` : ""}
-
-## ZADANIA
-1. Przeanalizuj przebieg spotkania na podstawie transkrypcji i slajdów
-2. Dla KAŻDEGO slajdu: opisz treść, kontekst dyskusji, wnioski
-3. Wyciągnij decyzje, zadania i podsumowanie
-4. Zidentyfikuj rozbieżności między slajdami a dialogiem
-5. Wyłap kontekst ukryty — informacje z dialogu których NIE MA na slajdach
-
-## SZCZEGÓLNY NACISK NA
-- **Analiza slajdów**: Każdy slajd = osobny insight z pełną treścią + kontekstem dialogu
-- **Dane liczbowe**: WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
-- **Rozbieżności**: Co mówiono innego niż jest na slajdach
-- **Kontekst ukryty**: Decyzje ustne, komentarze, background niewidoczny na slajdach
+W archiwum ZIP znajduje się ${uniqueFrames.length} unikalnych obrazów slajdów.
+Odczytaj z nich WSZYSTKIE dane: tytuły, bullet pointy, wykresy, tabele, liczby.` : ""}
 
 ## FORMAT WYNIKU
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
   "summary": "Kompletne podsumowanie 3-6 zdań po polsku.",
-  "integrated_transcript": "ZINTEGROWANY chronologiczny zapis spotkania z wstawionymi slajdami.",
+  "conversation_transcript": "PEŁNA transkrypcja rozmowy z poprawionymi mówcami. [MM:SS] Imię: tekst...",
+  "slides_section": "📊 [MM:SS] Tytuł — opis i podsumowanie każdego slajdu",
   "sentiment": "pozytywny | neutralny | negatywny | mieszany",
   "participants": ["Imię Nazwisko"],
   "tags": ["temat1", "temat2"],
@@ -149,17 +205,19 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
     "discussion_context": "Co mówili uczestnicy",
     "extra_context": "Info z dialogu niewidoczne na slajdzie",
     "discrepancies": "Rozbieżności"
-  }]
+  }],
+  "speakers": ["Imię Nazwisko"],
+  "slide_markers": [{ "timestamp": "MM:SS", "slide_title": "Tytuł", "slide_summary": "Podsumowanie" }]
 }
 
 ## ZASADY
-1. Zidentyfikuj mówców po kontekście — użyj pełnych imion
-2. Action items = konkretne zadania z właścicielem
-3. Decisions = wyraźnie podjęte decyzje
-4. Summary = zwięzłe, z danymi liczbowymi, po polsku
-5. Tags = główne tematy (max 7)
-6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu
-7. integrated_transcript = poprawiona wersja transkrypcji z wstawionymi slajdami`;
+1. conversation_transcript = PEŁNA rozmowa (~50 min), KAŻDA linia z audio z poprawionym mówcą
+2. slides_section = osobna sekcja ze WSZYSTKIMI slajdami i ich podsumowaniami
+3. Action items = konkretne zadania z właścicielem
+4. Decisions = wyraźnie podjęte decyzje
+5. Summary = zwięzłe, z danymi liczbowymi, po polsku
+6. Tags = główne tematy (max 7)
+7. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu`;
   }
 
   function handleCopy() {
@@ -178,8 +236,14 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
       toast.info("Pakuję prompt…");
       zip.file("prompt.txt", buildPrompt());
 
-      if (integratedTranscript) {
-        zip.file("transkrypcja_zagregowana.txt", integratedTranscript);
+      if (audioTranscript) {
+        zip.file("transkrypcja_audio.txt", audioTranscript);
+      }
+      if (ocrCaptions) {
+        zip.file("dialogi_ocr.txt", ocrCaptions);
+      }
+      if (slideDescriptions) {
+        zip.file("opisy_slajdow.txt", slideDescriptions);
       }
 
       if (uniqueFrames.length > 0) {
@@ -229,7 +293,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
     );
   }
 
-  const hasIntegrated = !!integratedTranscript;
+  const hasData = !!audioTranscript || !!ocrCaptions || uniqueFrames.length > 0;
 
   return (
     <div className="space-y-4">
@@ -254,16 +318,18 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
             <Archive className="w-4 h-4" />
             Pobierz ZIP ({[
               "prompt",
-              hasIntegrated ? "transkrypcja" : null,
+              audioTranscript ? "audio" : null,
+              ocrCaptions ? "OCR" : null,
+              slideDescriptions ? "opisy" : null,
               uniqueFrames.length > 0 ? `${uniqueFrames.length} slajdów` : null,
             ].filter(Boolean).join(" + ")})
           </>
         )}
       </button>
 
-      {!hasIntegrated && !uniqueFrames.length && (
+      {!hasData && (
         <p className="text-[10px] text-muted-foreground/60 text-center">
-          ⚠ Najpierw uruchom OCR (klatki + dialogi + agregacja) aby przygotować dane
+          ⚠ Najpierw uruchom transkrypcję audio i/lub OCR aby przygotować dane
         </p>
       )}
 
@@ -271,7 +337,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
           Rozpakuj ZIP i wgraj <strong>wszystkie pliki</strong> do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
-          ChatGPT sam odczyta treść slajdów z obrazów.
+          ChatGPT zagreguje transkrypcję audio z OCR, zidentyfikuje mówców i opisze slajdy.
         </p>
       </div>
 
@@ -280,15 +346,31 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
           <li className="flex items-center gap-1">
             <Check className="w-3 h-3 text-primary" />
-            prompt.txt — instrukcja analizy
+            prompt.txt — instrukcja agregacji i analizy
           </li>
-          {hasIntegrated ? (
+          {audioTranscript ? (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              transkrypcja_zagregowana.txt — dialogi chronologicznie
+              transkrypcja_audio.txt — surowy transkrypt z audio
             </li>
           ) : (
-            <li className="text-muted-foreground/60">✗ Brak zagregowanej transkrypcji — uruchom OCR</li>
+            <li className="text-muted-foreground/60">✗ Brak transkryptu audio</li>
+          )}
+          {ocrCaptions ? (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              dialogi_ocr.txt — dialogi z live captions (z imionami)
+            </li>
+          ) : (
+            <li className="text-muted-foreground/60">✗ Brak dialogów OCR</li>
+          )}
+          {slideDescriptions ? (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              opisy_slajdow.txt — opisy treści slajdów
+            </li>
+          ) : (
+            <li className="text-muted-foreground/60">✗ Brak opisów slajdów</li>
           )}
           {uniqueFrames.length > 0 ? (
             <li className="flex items-center gap-1">
@@ -296,7 +378,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
               {uniqueFrames.length} unikalnych slajdów prezentacji (ChatGPT zrobi OCR)
             </li>
           ) : (
-            <li className="text-muted-foreground/60">✗ Brak slajdów — uruchom OCR</li>
+            <li className="text-muted-foreground/60">✗ Brak slajdów</li>
           )}
         </ul>
       </div>
