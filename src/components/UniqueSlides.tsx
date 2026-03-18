@@ -19,8 +19,17 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Support both new crop-split and legacy unique-frames
+  // Support pdf-slides, crop-split, and legacy unique-frames
   const slideData = useMemo(() => {
+    const pdfSlides = analyses.find(a => a.source === "pdf-slides");
+    if (pdfSlides?.analysis_json?.unique_slides?.length) {
+      return {
+        frames: pdfSlides.analysis_json.unique_slides as { path: string; ts_formatted: string }[],
+        total_unique: pdfSlides.analysis_json.total_unique_slides as number,
+        total_frames: pdfSlides.analysis_json.total_pages as number,
+        source: "pdf-slides" as const,
+      };
+    }
     const cropSplit = analyses.find(a => a.source === "crop-split");
     if (cropSplit?.analysis_json?.unique_slides?.length) {
       return {
