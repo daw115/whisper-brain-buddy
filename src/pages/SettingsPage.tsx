@@ -280,7 +280,7 @@ export default function SettingsPage() {
                     key={c.value}
                     onClick={() => setNewCategoryColor(c.value)}
                     className={`w-6 h-6 rounded-full transition-all ${newCategoryColor === c.value ? "ring-2 ring-offset-2 ring-offset-secondary scale-110" : "hover:scale-110"}`}
-                    style={{ backgroundColor: c.value, ringColor: c.value }}
+                    style={{ backgroundColor: c.value }}
                     title={c.name}
                   />
                 ))}
