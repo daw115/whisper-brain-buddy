@@ -242,31 +242,49 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // ========== STEP 3: CROP-SPLIT ==========
+    // ========== STEP 3: CROP-SPLIT (batched) ==========
     if (selectedMode === "crop-split") {
-      console.log("Step 3: Crop-split frames into slides + captions...");
+      const { batchOffset = 0, batchSize = 30 } = await req.clone().json().catch(() => ({}));
+      console.log(`Step 3: Crop-split batch offset=${batchOffset} size=${batchSize}...`);
       const framePaths = await collectFramePaths();
+      const totalFrames = framePaths.length;
 
-      // Download first frame to detect caption bar height
+      // On first batch (offset 0): detect caption bar, clean previous data
+      let captionBarY: number;
+      let imageWidth: number;
+      let imageHeight: number;
+
+      // Download first frame to detect caption bar height (always needed)
       const { data: firstBlob } = await supabaseAdmin.storage.from("recordings").download(framePaths[0].path);
       if (!firstBlob) throw { status: 500, message: "Cannot download first frame" };
       const firstBytes = new Uint8Array(await firstBlob.arrayBuffer());
       const firstDecoded = decodeJpeg(firstBytes, { useTArray: true, formatAsRGBA: true });
-      const captionBarY = detectCaptionBarY(
-        firstDecoded.data, firstDecoded.width, firstDecoded.height
-      );
+      captionBarY = detectCaptionBarY(firstDecoded.data, firstDecoded.width, firstDecoded.height);
+      imageWidth = firstDecoded.width;
+      imageHeight = firstDecoded.height;
+
+      // Load existing hashes from previous batches (for cross-batch dedup)
+      const prevData = batchOffset > 0 ? await loadLatest("crop-split") as any : null;
+      const seenSlideHashes = new Map<string, number>();
+      const existingSlides: any[] = prevData?.unique_slides ?? [];
+      const existingCaptions: any[] = prevData?.caption_crops ?? [];
+      // Rebuild hash set from existing slide paths (hash stored in filename)
+      if (prevData?.slide_hashes) {
+        for (const [h, ts] of Object.entries(prevData.slide_hashes)) {
+          seenSlideHashes.set(h, ts as number);
+        }
+      }
 
       const stem = meeting.recording_filename!.replace(/\.[^.]+$/, "");
       const slidesDir = `${meeting.user_id}/crops/${stem}/slides`;
       const captionsDir = `${meeting.user_id}/crops/${stem}/captions`;
 
-      // Process frames, dedup slides
-      const seenSlideHashes = new Map<string, number>(); // hash → first timestamp
-      const uniqueSlides: { path: string; timestamp: number; ts_formatted: string }[] = [];
-      const allCaptions: { path: string; timestamp: number; ts_formatted: string }[] = [];
+      const batchFrames = framePaths.slice(batchOffset, batchOffset + batchSize);
+      const newSlides: typeof existingSlides = [];
+      const newCaptions: typeof existingCaptions = [];
       let processedCount = 0;
 
-      for (const frame of framePaths.slice(0, 120)) { // limit to 120 frames
+      for (const frame of batchFrames) {
         const { data: blob } = await supabaseAdmin.storage.from("recordings").download(frame.path);
         if (!blob) continue;
         const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -279,7 +297,7 @@ serve(async (req) => {
         await supabaseAdmin.storage.from("recordings").upload(captionPath, captionJpeg, {
           contentType: "image/jpeg", upsert: true,
         });
-        allCaptions.push({ path: captionPath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+        newCaptions.push({ path: captionPath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
 
         // Dedup slides by hash
         const slideHash = hashSlideBytes(slideJpeg);
@@ -289,28 +307,44 @@ serve(async (req) => {
           await supabaseAdmin.storage.from("recordings").upload(slidePath, slideJpeg, {
             contentType: "image/jpeg", upsert: true,
           });
-          uniqueSlides.push({ path: slidePath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+          newSlides.push({ path: slidePath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
         }
 
         processedCount++;
-        if (processedCount % 20 === 0) {
-          console.log(`Processed ${processedCount}/${framePaths.length} frames, ${uniqueSlides.length} unique slides so far`);
-        }
       }
 
-      console.log(`Crop-split done: ${processedCount} frames → ${uniqueSlides.length} unique slides, ${allCaptions.length} caption crops`);
+      const allSlides = [...existingSlides, ...newSlides];
+      const allCaptions = [...existingCaptions, ...newCaptions];
+      const totalProcessed = batchOffset + processedCount;
+      const hasMore = totalProcessed < totalFrames;
+
+      // Serialize hashes for cross-batch dedup
+      const slideHashesObj: Record<string, number> = {};
+      seenSlideHashes.forEach((ts, h) => { slideHashesObj[h] = ts; });
+
+      console.log(`Crop-split batch done: ${processedCount} frames (${totalProcessed}/${totalFrames}), ${allSlides.length} unique slides total`);
 
       const cropData = {
         caption_bar_y: captionBarY,
-        image_height: firstDecoded.height,
-        image_width: firstDecoded.width,
-        caption_bar_percent: Math.round((1 - captionBarY / firstDecoded.height) * 100),
-        unique_slides: uniqueSlides,
+        image_height: imageHeight,
+        image_width: imageWidth,
+        caption_bar_percent: Math.round((1 - captionBarY / imageHeight) * 100),
+        unique_slides: allSlides,
         caption_crops: allCaptions,
-        total_frames: processedCount,
-        total_unique_slides: uniqueSlides.length,
+        slide_hashes: slideHashesObj,
+        total_frames: totalProcessed,
+        total_unique_slides: allSlides.length,
         total_captions: allCaptions.length,
+        has_more: hasMore,
+        next_offset: hasMore ? totalProcessed : null,
+        frames_total: totalFrames,
       };
+
+      // Delete previous and save updated
+      if (batchOffset > 0) {
+        await supabase.from("meeting_analyses").delete()
+          .eq("meeting_id", meetingId).eq("source", "crop-split");
+      }
       await saveAnalysis("crop-split", cropData);
       results.cropSplit = cropData;
     }
