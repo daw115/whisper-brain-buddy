@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 interface Props {
   meetingId: string;
   hasFrames: boolean;
+  recordingFilename: string;
   onComplete?: (result: any) => void;
 }
 
@@ -14,8 +15,8 @@ type Step = "idle" | "crop-split" | "ocr-captions" | "describe-slides" | "aggreg
 
 const stepConfig: Record<Exclude<Step, "idle">, { label: string; description: string; icon: typeof Scissors; stepNum: number }> = {
   "crop-split": {
-    label: "Przytnij i deduplikuj",
-    description: "Dzieli klatki na slajdy + napisy, deduplikuje slajdy",
+    label: "Deduplikuj klatki",
+    description: "Hashuje klatki i usuwa duplikaty (lokalnie w przeglądarce)",
     icon: Scissors,
     stepNum: 3,
   },
@@ -39,59 +40,155 @@ const stepConfig: Record<Exclude<Step, "idle">, { label: string; description: st
   },
 };
 
-export default function SlideTranscriptionButton({ meetingId, hasFrames, onComplete }: Props) {
+// Hash raw JPEG bytes for dedup (no image decoding needed)
+function hashBytes(bytes: Uint8Array): string {
+  let hash = 0;
+  const start = Math.min(500, bytes.length);
+  const end = Math.min(bytes.length, 8000);
+  for (let i = start; i < end; i += 3) {
+    hash = ((hash << 5) - hash + bytes[i]) | 0;
+  }
+  return hash.toString(36);
+}
+
+function formatTs(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+export default function SlideTranscriptionButton({ meetingId, hasFrames, recordingFilename, onComplete }: Props) {
   const [runningStep, setRunningStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const [completedSteps, setCompletedSteps] = useState<Record<string, any>>({});
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
 
+  // Step 3: Client-side frame deduplication
+  async function runLocalDedup() {
+    setError(null);
+    setRunningStep("crop-split");
+    setBatchProgress("Ładowanie listy klatek...");
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Nie zalogowano");
+
+      const stem = recordingFilename.replace(/\.[^.]+$/, "");
+      
+      // Find all frame directories
+      const { data: allDirs } = await supabase.storage
+        .from("recordings")
+        .list(`${user.id}/frames`);
+
+      const dirPrefixes = [`${user.id}/frames/${stem}`];
+      if (allDirs) {
+        for (const d of allDirs) {
+          if (d.name.startsWith(stem + "_part") || d.name.startsWith(stem + "_sub")) {
+            dirPrefixes.push(`${user.id}/frames/${d.name}`);
+          }
+        }
+      }
+
+      // Collect all frame paths
+      const allFrames: { path: string; timestamp: number }[] = [];
+      for (const prefix of dirPrefixes) {
+        const { data: files } = await supabase.storage
+          .from("recordings")
+          .list(prefix, { limit: 200, sortBy: { column: "name", order: "asc" } });
+        if (files) {
+          for (const f of files) {
+            if (!f.name.match(/\.(jpg|jpeg|png)$/i)) continue;
+            const m = f.name.match(/frame_(\d+)/);
+            allFrames.push({ path: `${prefix}/${f.name}`, timestamp: m ? parseInt(m[1]) : 0 });
+          }
+        }
+      }
+
+      allFrames.sort((a, b) => a.timestamp - b.timestamp);
+      if (allFrames.length === 0) throw new Error("Brak klatek — najpierw wygeneruj klatki");
+
+      setBatchProgress(`Znaleziono ${allFrames.length} klatek, deduplikuję...`);
+
+      // Download and hash each frame for dedup
+      const seenHashes = new Map<string, number>();
+      const uniqueFrames: { path: string; timestamp: number; ts_formatted: string }[] = [];
+
+      for (let i = 0; i < allFrames.length; i++) {
+        const frame = allFrames[i];
+        
+        if (i % 10 === 0) {
+          setBatchProgress(`${i + 1}/${allFrames.length} klatek, ${uniqueFrames.length} unikalnych`);
+        }
+
+        const { data: blob } = await supabase.storage
+          .from("recordings")
+          .download(frame.path);
+        if (!blob) continue;
+
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const frameHash = hashBytes(bytes);
+        const tsFormatted = formatTs(frame.timestamp);
+
+        if (!seenHashes.has(frameHash)) {
+          seenHashes.set(frameHash, frame.timestamp);
+          uniqueFrames.push({ path: frame.path, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+        }
+      }
+
+      setBatchProgress(`Zapisuję wynik: ${uniqueFrames.length} unikalnych z ${allFrames.length}...`);
+
+      // Save result to meeting_analyses
+      // Delete previous crop-split data first
+      await (supabase as any).from("meeting_analyses").delete()
+        .eq("meeting_id", meetingId).eq("source", "crop-split");
+
+      const cropData = {
+        unique_slides: uniqueFrames,
+        caption_crops: allFrames.map(f => ({ path: f.path, timestamp: f.timestamp, ts_formatted: formatTs(f.timestamp) })),
+        total_frames: allFrames.length,
+        total_unique_slides: uniqueFrames.length,
+        total_captions: allFrames.length,
+      };
+
+      const { error: saveErr } = await (supabase as any).from("meeting_analyses").insert({
+        meeting_id: meetingId,
+        source: "crop-split",
+        analysis_json: cropData,
+      });
+      if (saveErr) throw new Error("Błąd zapisu: " + saveErr.message);
+
+      setCompletedSteps(prev => ({ ...prev, "crop-split": { cropSplit: cropData } }));
+      onComplete?.({ cropSplit: cropData });
+      toast.success(`Krok 3: ${uniqueFrames.length} unikalnych klatek z ${allFrames.length}`);
+    } catch (err: any) {
+      setError(err.message || "Nieznany błąd");
+      toast.error("Błąd: " + (err.message || "nieznany"));
+    } finally {
+      setRunningStep("idle");
+      setBatchProgress(null);
+    }
+  }
+
   async function runStep(mode: string) {
+    if (mode === "crop-split") {
+      return runLocalDedup();
+    }
+
     setError(null);
     setRunningStep(mode as Step);
     setBatchProgress(null);
 
     try {
-      if (mode === "crop-split") {
-        // Batched crop-split: loop until all frames processed
-        let offset = 0;
-        const batchSize = 20;
-        let lastResult: any = null;
+      const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
+        body: { meetingId, mode },
+      });
+      if (fnError) throw new Error(fnError.message || "Błąd wywołania");
+      if (data?.error) throw new Error(data.error);
 
-        while (true) {
-          setBatchProgress(`Przetwarzam klatki od ${offset}...`);
-          const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
-            body: { meetingId, mode, batchOffset: offset, batchSize },
-          });
-          if (fnError) throw new Error(fnError.message || "Błąd wywołania");
-          if (data?.error) throw new Error(data.error);
-
-          lastResult = data?.results?.cropSplit;
-          if (!lastResult) throw new Error("Brak wyników crop-split");
-
-          const processed = lastResult.total_frames ?? 0;
-          const total = lastResult.frames_total ?? processed;
-          setBatchProgress(`${processed}/${total} klatek, ${lastResult.total_unique_slides} slajdów`);
-
-          if (!lastResult.has_more) break;
-          offset = lastResult.next_offset;
-        }
-
-        setCompletedSteps(prev => ({ ...prev, [mode]: { cropSplit: lastResult } }));
-        onComplete?.({ cropSplit: lastResult });
-        toast.success(`Krok 3: gotowe! ${lastResult.total_unique_slides} slajdów z ${lastResult.total_frames} klatek`);
-      } else {
-        // Non-batched steps
-        const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
-          body: { meetingId, mode },
-        });
-        if (fnError) throw new Error(fnError.message || "Błąd wywołania");
-        if (data?.error) throw new Error(data.error);
-
-        const stepResults = data?.results ?? {};
-        setCompletedSteps(prev => ({ ...prev, [mode]: stepResults }));
-        onComplete?.(stepResults);
-        toast.success(`Krok ${stepConfig[mode as keyof typeof stepConfig]?.stepNum}: gotowe!`);
-      }
+      const stepResults = data?.results ?? {};
+      setCompletedSteps(prev => ({ ...prev, [mode]: stepResults }));
+      onComplete?.(stepResults);
+      toast.success(`Krok ${stepConfig[mode as keyof typeof stepConfig]?.stepNum}: gotowe!`);
     } catch (err: any) {
       setError(err.message || "Nieznany błąd");
       toast.error("Błąd: " + (err.message || "nieznany"));
@@ -107,7 +204,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
     const data = completedSteps[step];
     if (!data) return null;
     if (step === "crop-split" && data.cropSplit) {
-      return `${data.cropSplit.total_unique_slides} slajdów, ${data.cropSplit.total_captions} napisów`;
+      return `${data.cropSplit.total_unique_slides} unikalnych z ${data.cropSplit.total_frames} klatek`;
     }
     if (step === "ocr-captions" && data.captions) {
       return `${data.captions.total_entries} wypowiedzi`;
@@ -180,7 +277,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
       <div className="text-[9px] text-muted-foreground/70 text-center leading-relaxed">
         <p>
           <strong>1-2)</strong> Klatki (powyżej) →{" "}
-          <strong>3)</strong> Przytnij →{" "}
+          <strong>3)</strong> Deduplikuj (lokalnie) →{" "}
           <strong>4)</strong> OCR napisów →{" "}
           <strong>5)</strong> Opisz slajdy →{" "}
           <strong>6)</strong> Agreguj
