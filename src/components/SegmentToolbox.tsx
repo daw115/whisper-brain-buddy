@@ -49,7 +49,7 @@ interface Props {
   onTranscriptGenerated?: () => void;
 }
 
-type Phase = "idle" | "extracting-mp3" | "splitting" | "uploading-parts" | "batch-transcribing" | "batch-frames";
+type Phase = "idle" | "extracting-mp3" | "splitting" | "uploading-parts" | "batch-transcribing" | "batch-frames" | "merging";
 
 export default function SegmentToolbox({
   recordingFilename,
