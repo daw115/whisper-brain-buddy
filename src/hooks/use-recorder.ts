@@ -208,7 +208,9 @@ export function useRecorder(): RecordingState {
           description: filename,
           duration: 5000,
         });
-        setLastRecording({ blob, filename, url: signedUrl });
+        // Use base filename for meeting record so RecordingSegments can find all parts
+        const meetingFilename = hadPriorSegments ? `${baseFilenameRef.current}.webm` : filename;
+        setLastRecording({ blob, filename: meetingFilename, url: signedUrl });
 
         // Extract frames in background
         toast.loading("Wyodrębnianie klatek…", { id: "frames" });
