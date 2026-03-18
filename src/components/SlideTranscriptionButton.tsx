@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Scissors, Eye, Merge, Loader2, Check, AlertCircle, ScanText } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Scissors, Eye, Merge, Loader2, Check, AlertCircle, ScanText, RotateCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
