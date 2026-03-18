@@ -661,16 +661,28 @@ export default function SegmentToolbox({
           </button>
         </div>
 
-        {/* Frame interval */}
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <span>Slajdy co:</span>
-          <input
-            type="number" min={1} max={300} value={frameInterval}
-            onChange={e => { const v = parseInt(e.target.value); if (v >= 1 && v <= 300) setFrameInterval(v); }}
-            disabled={busy}
-            className="w-12 text-xs bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground text-center"
-          />
-          <span>sek</span>
+        {/* Frame interval + Max segment size */}
+        <div className="flex items-center gap-4 flex-wrap text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Slajdy co:</span>
+            <input
+              type="number" min={1} max={300} value={frameInterval}
+              onChange={e => { const v = parseInt(e.target.value); if (v >= 1 && v <= 300) setFrameInterval(v); }}
+              disabled={busy}
+              className="w-12 text-xs bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground text-center"
+            />
+            <span>sek</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span>Max segment:</span>
+            <div className="flex gap-1">
+              {[25, 50, 100, 200].map(v => (
+                <button key={v} onClick={() => setMaxSegmentMB(v)} disabled={busy}
+                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${maxSegmentMB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                >{v} MB</button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Progress for video tools */}
