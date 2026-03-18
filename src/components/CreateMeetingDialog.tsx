@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, Plus, Loader2 } from "lucide-react";
-import { useCreateMeeting } from "@/hooks/use-meetings";
+import { useCreateMeeting, useCategories } from "@/hooks/use-meetings";
 import { toast } from "sonner";
 
 interface CreateMeetingDialogProps {
@@ -15,7 +15,9 @@ export default function CreateMeetingDialog({ open, onClose }: CreateMeetingDial
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [summary, setSummary] = useState("");
+  const [categoryId, setCategoryId] = useState<string>("");
   const createMeeting = useCreateMeeting();
+  const { data: categories = [] } = useCategories();
 
   if (!open) return null;
 
@@ -43,6 +45,7 @@ export default function CreateMeetingDialog({ open, onClose }: CreateMeetingDial
         participants,
         tags,
         summary: summary.trim() || undefined,
+        category_id: categoryId || undefined,
       });
       toast.success("Meeting created");
       resetAndClose();
@@ -58,6 +61,7 @@ export default function CreateMeetingDialog({ open, onClose }: CreateMeetingDial
     setTagInput("");
     setTags([]);
     setSummary("");
+    setCategoryId("");
     onClose();
   };
 
@@ -86,6 +90,25 @@ export default function CreateMeetingDialog({ open, onClose }: CreateMeetingDial
               maxLength={200}
             />
           </div>
+
+          {/* Category */}
+          {categories.length > 0 && (
+            <div>
+              <label className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider block mb-1.5">
+                Kategoria
+              </label>
+              <select
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                className="w-full bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 transition-colors"
+              >
+                <option value="">— Bez kategorii —</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Participants */}
           <div>

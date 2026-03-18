@@ -14,7 +14,7 @@ import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useCreateMeeting } from "@/hooks/use-meetings";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
-import AuthPage from "@/pages/AuthPage";
+import PinLoginPage from "@/pages/PinLoginPage";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -110,7 +110,7 @@ export default function Index() {
   }
 
   if (!user) {
-    return <AuthPage />;
+    return <PinLoginPage />;
   }
 
   return (

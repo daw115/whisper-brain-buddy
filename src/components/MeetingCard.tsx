@@ -57,6 +57,11 @@ export default function MeetingCard({ meeting, index }: MeetingCardProps) {
             {participants.length}
           </span>
         )}
+        {meeting.categories && (
+          <span className="text-[10px] font-mono-data text-primary bg-primary/10 px-2 py-0.5 rounded">
+            {meeting.categories.name}
+          </span>
+        )}
       </div>
 
       {tags.length > 0 && (

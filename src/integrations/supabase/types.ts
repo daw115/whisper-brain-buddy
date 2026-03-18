@@ -58,6 +58,27 @@ export type Database = {
           },
         ]
       }
+      categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       decisions: {
         Row: {
           created_at: string
@@ -153,6 +174,7 @@ export type Database = {
       }
       meetings: {
         Row: {
+          category_id: string | null
           created_at: string
           date: string
           duration: string | null
@@ -167,6 +189,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          category_id?: string | null
           created_at?: string
           date?: string
           duration?: string | null
@@ -181,6 +204,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          category_id?: string | null
           created_at?: string
           date?: string
           duration?: string | null
@@ -193,6 +217,41 @@ export type Database = {
           title?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meetings_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pin_users: {
+        Row: {
+          auth_email: string
+          auth_user_id: string
+          created_at: string
+          id: string
+          name: string
+          pin_code: string
+        }
+        Insert: {
+          auth_email: string
+          auth_user_id: string
+          created_at?: string
+          id?: string
+          name: string
+          pin_code: string
+        }
+        Update: {
+          auth_email?: string
+          auth_user_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          pin_code?: string
         }
         Relationships: []
       }
@@ -239,7 +298,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_auth_email_by_pin: { Args: { p_pin: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never

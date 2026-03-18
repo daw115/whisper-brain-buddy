@@ -83,9 +83,9 @@ export default function AppSidebar({ isRecording, recordingTime }: AppSidebarPro
         {user && (
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] text-muted-foreground font-mono-data truncate max-w-[180px]">
-              {user.email}
+              {localStorage.getItem("cerebro_user_name") || user.user_metadata?.display_name || "User"}
             </span>
-            <button onClick={signOut} className="text-muted-foreground hover:text-foreground transition-colors">
+            <button onClick={() => { localStorage.removeItem("cerebro_pin"); localStorage.removeItem("cerebro_user_name"); signOut(); }} className="text-muted-foreground hover:text-foreground transition-colors">
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
