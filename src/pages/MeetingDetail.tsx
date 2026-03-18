@@ -16,6 +16,7 @@ import RecordingSplitter from "@/components/RecordingSplitter";
 import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
 import TranscribeButton from "@/components/TranscribeButton";
+import AudioExtractor from "@/components/AudioExtractor";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
@@ -233,6 +234,18 @@ export default function MeetingDetail() {
                     recordingUrl={recordingUrl}
                     recordingFilename={meeting.recording_filename}
                     onComplete={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
+                  />
+                </div>
+              )}
+
+              {/* Audio extraction & splitting */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <AudioExtractor
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                    recordingSizeBytes={meeting.recording_size_bytes}
+                    meetingId={meeting.id}
                   />
                 </div>
               )}
