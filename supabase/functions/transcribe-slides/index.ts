@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { decode as decodeJpeg, encode as encodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
+// No jpeg-js import — we skip server-side image cropping to avoid CPU limits
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,85 +146,14 @@ serve(async (req) => {
       return allFiles;
     }
 
-    // Detect caption bar height by scanning from bottom for dark rows
-    function detectCaptionBarY(pixels: Uint8Array, width: number, height: number): number {
-      // Scan from bottom up, find where the dark region ends
-      // Dark row = average brightness < 50
-      const DARK_THRESHOLD = 50;
-      const MIN_BAR_HEIGHT = 40; // at least 40px
-      const MAX_BAR_HEIGHT = Math.floor(height * 0.25); // at most 25%
-
-      let darkEnd = 0; // how many rows from bottom are dark
-      for (let row = height - 1; row >= height - MAX_BAR_HEIGHT; row--) {
-        let sumBrightness = 0;
-        const sampleStep = Math.max(1, Math.floor(width / 50)); // sample ~50 pixels per row
-        let samples = 0;
-        for (let x = 0; x < width; x += sampleStep) {
-          const idx = (row * width + x) * 4;
-          const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-          sumBrightness += (r + g + b) / 3;
-          samples++;
-        }
-        const avg = sumBrightness / samples;
-        if (avg < DARK_THRESHOLD) {
-          darkEnd = height - row;
-        } else {
-          // Found a non-dark row, stop
-          break;
-        }
-      }
-
-      if (darkEnd < MIN_BAR_HEIGHT) {
-        // No caption bar detected, use a default ~15%
-        console.log(`No dark caption bar detected (darkEnd=${darkEnd}px), using 15% default`);
-        return Math.floor(height * 0.85);
-      }
-
-      // Add a small padding (10px) above the dark region
-      const captionTop = height - darkEnd - 10;
-      console.log(`Caption bar detected: starts at y=${captionTop} (bar height=${darkEnd + 10}px, image height=${height})`);
-      return Math.max(0, captionTop);
-    }
-
-    // Crop JPEG bytes → returns { slideJpeg, captionJpeg, width, height, captionBarY }
-    function cropFrame(jpegBytes: Uint8Array, captionBarY: number) {
-      const decoded = decodeJpeg(jpegBytes, { useTArray: true, formatAsRGBA: true });
-      const { width, height, data } = decoded;
-
-      // Slide = top portion (0 to captionBarY)
-      const slideH = captionBarY;
-      const slidePixels = new Uint8Array(width * slideH * 4);
-      for (let row = 0; row < slideH; row++) {
-        const srcOff = row * width * 4;
-        const dstOff = row * width * 4;
-        slidePixels.set(data.subarray(srcOff, srcOff + width * 4), dstOff);
-      }
-
-      // Caption = bottom portion (captionBarY to height)
-      const captionH = height - captionBarY;
-      const captionPixels = new Uint8Array(width * captionH * 4);
-      for (let row = 0; row < captionH; row++) {
-        const srcOff = (captionBarY + row) * width * 4;
-        const dstOff = row * width * 4;
-        captionPixels.set(data.subarray(srcOff, srcOff + width * 4), dstOff);
-      }
-
-      const slideJpeg = encodeJpeg({ data: slidePixels, width, height: slideH }, 80);
-      const captionJpeg = encodeJpeg({ data: captionPixels, width, height: captionH }, 80);
-
-      return {
-        slideJpeg: new Uint8Array(slideJpeg.data),
-        captionJpeg: new Uint8Array(captionJpeg.data),
-        width, height, slideH, captionH,
-      };
-    }
-
-    // Hash slide pixels for dedup (uses 4KB sample from slide jpeg)
-    function hashSlideBytes(jpegBytes: Uint8Array): string {
+    // Hash raw JPEG bytes for dedup (no decode needed)
+    function hashFrameBytes(jpegBytes: Uint8Array): string {
       let hash = 0;
-      const sample = jpegBytes.slice(200, 4200); // skip JPEG header, sample 4KB
-      for (let i = 0; i < sample.length; i += 2) {
-        hash = ((hash << 5) - hash + sample[i]) | 0;
+      // Sample bytes across the image, skip header
+      const start = Math.min(500, jpegBytes.length);
+      const end = Math.min(jpegBytes.length, 8000);
+      for (let i = start; i < end; i += 3) {
+        hash = ((hash << 5) - hash + jpegBytes[i]) | 0;
       }
       return hash.toString(36);
     }
@@ -243,98 +172,64 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // ========== STEP 3: CROP-SPLIT (batched) ==========
+    // ========== STEP 3: DEDUPLICATE FRAMES (batched, no image decoding) ==========
     if (selectedMode === "crop-split") {
-      console.log(`Step 3: Crop-split batch offset=${batchOffset} size=${batchSize}...`);
+      console.log(`Step 3: Deduplicate frames batch offset=${batchOffset} size=${batchSize}...`);
       const framePaths = await collectFramePaths();
       const totalFrames = framePaths.length;
 
-      // On first batch (offset 0): detect caption bar, clean previous data
-      let captionBarY: number;
-      let imageWidth: number;
-      let imageHeight: number;
-
-      // Download first frame to detect caption bar height (always needed)
-      const { data: firstBlob } = await supabaseAdmin.storage.from("recordings").download(framePaths[0].path);
-      if (!firstBlob) throw { status: 500, message: "Cannot download first frame" };
-      const firstBytes = new Uint8Array(await firstBlob.arrayBuffer());
-      const firstDecoded = decodeJpeg(firstBytes, { useTArray: true, formatAsRGBA: true });
-      captionBarY = detectCaptionBarY(firstDecoded.data, firstDecoded.width, firstDecoded.height);
-      imageWidth = firstDecoded.width;
-      imageHeight = firstDecoded.height;
-
       // Load existing hashes from previous batches (for cross-batch dedup)
       const prevData = batchOffset > 0 ? await loadLatest("crop-split") as any : null;
-      const seenSlideHashes = new Map<string, number>();
-      const existingSlides: any[] = prevData?.unique_slides ?? [];
-      const existingCaptions: any[] = prevData?.caption_crops ?? [];
-      // Rebuild hash set from existing slide paths (hash stored in filename)
+      const seenHashes = new Map<string, number>();
+      const existingUniqueFrames: any[] = prevData?.unique_slides ?? [];
       if (prevData?.slide_hashes) {
         for (const [h, ts] of Object.entries(prevData.slide_hashes)) {
-          seenSlideHashes.set(h, ts as number);
+          seenHashes.set(h, ts as number);
         }
       }
 
-      const stem = meeting.recording_filename!.replace(/\.[^.]+$/, "");
-      const slidesDir = `${meeting.user_id}/crops/${stem}/slides`;
-      const captionsDir = `${meeting.user_id}/crops/${stem}/captions`;
-
       const batchFrames = framePaths.slice(batchOffset, batchOffset + batchSize);
-      const newSlides: typeof existingSlides = [];
-      const newCaptions: typeof existingCaptions = [];
+      const newUnique: any[] = [];
       let processedCount = 0;
 
       for (const frame of batchFrames) {
         const { data: blob } = await supabaseAdmin.storage.from("recordings").download(frame.path);
         if (!blob) continue;
         const bytes = new Uint8Array(await blob.arrayBuffer());
-
-        const { slideJpeg, captionJpeg } = cropFrame(bytes, captionBarY);
         const tsFormatted = formatTs(frame.timestamp);
 
-        // Upload caption crop (always)
-        const captionPath = `${captionsDir}/caption_${tsFormatted.replace(":", "_")}.jpg`;
-        await supabaseAdmin.storage.from("recordings").upload(captionPath, captionJpeg, {
-          contentType: "image/jpeg", upsert: true,
-        });
-        newCaptions.push({ path: captionPath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
-
-        // Dedup slides by hash
-        const slideHash = hashSlideBytes(slideJpeg);
-        if (!seenSlideHashes.has(slideHash)) {
-          seenSlideHashes.set(slideHash, frame.timestamp);
-          const slidePath = `${slidesDir}/slide_${tsFormatted.replace(":", "_")}.jpg`;
-          await supabaseAdmin.storage.from("recordings").upload(slidePath, slideJpeg, {
-            contentType: "image/jpeg", upsert: true,
-          });
-          newSlides.push({ path: slidePath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+        // Dedup by raw byte hash (no decode needed)
+        const frameHash = hashFrameBytes(bytes);
+        if (!seenHashes.has(frameHash)) {
+          seenHashes.set(frameHash, frame.timestamp);
+          newUnique.push({ path: frame.path, timestamp: frame.timestamp, ts_formatted: tsFormatted });
         }
-
         processedCount++;
       }
 
-      const allSlides = [...existingSlides, ...newSlides];
-      const allCaptions = [...existingCaptions, ...newCaptions];
+      const allUnique = [...existingUniqueFrames, ...newUnique];
       const totalProcessed = batchOffset + processedCount;
       const hasMore = totalProcessed < totalFrames;
 
       // Serialize hashes for cross-batch dedup
       const slideHashesObj: Record<string, number> = {};
-      seenSlideHashes.forEach((ts, h) => { slideHashesObj[h] = ts; });
+      seenHashes.forEach((ts, h) => { slideHashesObj[h] = ts; });
 
-      console.log(`Crop-split batch done: ${processedCount} frames (${totalProcessed}/${totalFrames}), ${allSlides.length} unique slides total`);
+      console.log(`Dedup batch done: ${processedCount} frames (${totalProcessed}/${totalFrames}), ${allUnique.length} unique total`);
+
+      // All frames are also caption sources (Gemini will read captions from full frames)
+      const allFrameRefs = [
+        ...(prevData?.caption_crops ?? []),
+        ...batchFrames.map(f => ({ path: f.path, timestamp: f.timestamp, ts_formatted: formatTs(f.timestamp) })),
+      ];
 
       const cropData = {
-        caption_bar_y: captionBarY,
-        image_height: imageHeight,
-        image_width: imageWidth,
-        caption_bar_percent: Math.round((1 - captionBarY / imageHeight) * 100),
-        unique_slides: allSlides,
-        caption_crops: allCaptions,
+        unique_slides: allUnique,
+        caption_crops: allFrameRefs,
         slide_hashes: slideHashesObj,
         total_frames: totalProcessed,
-        total_unique_slides: allSlides.length,
-        total_captions: allCaptions.length,
+        total_unique_slides: allUnique.length,
+        total_captions: allFrameRefs.length,
         has_more: hasMore,
         next_offset: hasMore ? totalProcessed : null,
         frames_total: totalFrames,
@@ -383,9 +278,9 @@ serve(async (req) => {
         const ocrParts: any[] = [
           {
             type: "text",
-            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} wyciętych pasków z napisami (live captions) z nagrania spotkania Teams.
+            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} screenów z nagrania spotkania Teams.
 
-Każdy obrazek to DOLNY pasek ekranu z ciemnym tłem, zawierający napisy/subtitles.
+Na DOLE każdego ekranu znajduje się ciemny pasek z napisami (live captions/subtitles). Zignoruj resztę ekranu (prezentację) — skupiaj się WYŁĄCZNIE na dolnym pasku z napisami.
 
 ## ZADANIE
 1. Odczytaj tekst z każdego paska
