@@ -77,6 +77,7 @@ export default function SegmentToolbox({
   const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const [transcribeMode, setTranscribeMode] = useState<"online" | "offline">("online");
   const [chunkMB, setChunkMB] = useState(20);
+  const [maxSegmentMB, setMaxSegmentMB] = useState(100);
   const [frameInterval, setFrameInterval] = useState(30);
   const [expandedFrameIdx, setExpandedFrameIdx] = useState<number | null>(null);
   const [cachedFrames, setCachedFrames] = useState<{ base64: string; timestamp: string }[]>([]);
