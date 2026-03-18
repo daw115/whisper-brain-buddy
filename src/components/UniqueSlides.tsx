@@ -11,6 +11,7 @@ interface AnalysisEntry {
 interface Props {
   meetingId: string;
   analyses: AnalysisEntry[];
+  onDeleted?: () => void;
 }
 
 export default function UniqueSlides({ meetingId, analyses }: Props) {
