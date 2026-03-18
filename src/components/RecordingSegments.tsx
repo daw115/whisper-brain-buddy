@@ -121,6 +121,21 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
+  async function handleDeleteAll() {
+    if (!confirm(`Usunąć wszystkie ${segments.length} segmentów?`)) return;
+    try {
+      const paths = segments.map((s) => s.path);
+      const { error } = await supabase.storage.from("recordings").remove(paths);
+      if (error) throw error;
+      toast.success(`Usunięto ${segments.length} segmentów`);
+      setSegments([]);
+      setPlayingIdx(null);
+      setExpandedFrames(null);
+    } catch (err: any) {
+      toast.error("Błąd usuwania: " + (err.message || "nieznany"));
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
@@ -134,13 +149,25 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
 
   return (
     <div className="space-y-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider hover:text-foreground transition-colors w-full"
-      >
-        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        Segmenty ({segments.length})
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider hover:text-foreground transition-colors"
+        >
+          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          Segmenty ({segments.length})
+        </button>
+        {expanded && (
+          <button
+            onClick={handleDeleteAll}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+            title="Usuń wszystkie segmenty"
+          >
+            <Trash2 className="w-3 h-3" />
+            Usuń wszystkie
+          </button>
+        )}
+      </div>
 
       {expanded && (
         <div className="space-y-2">
