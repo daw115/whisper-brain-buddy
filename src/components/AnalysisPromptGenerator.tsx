@@ -320,16 +320,44 @@ ${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiz
 
   return (
     <div className="space-y-4">
-      <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">
-        Analiza w ChatGPT Plus
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">
+          Paczka danych ChatGPT
+        </h2>
+      </div>
+
+      {/* One-click download */}
+      <button
+        onClick={handleDownloadPackage}
+        disabled={downloading || convertingMp3}
+        className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 press-effect"
+      >
+        {downloading ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Pobieram paczkę…
+          </>
+        ) : (
+          <>
+            <Package className="w-4 h-4" />
+            Pobierz paczkę ({[
+              hasTranscript ? "prompt" : null,
+              frames.length > 0 ? `${frames.length} slajdów` : null,
+              mp3Url ? "MP3" : null,
+            ].filter(Boolean).join(" + ") || "prompt"})
+          </>
+        )}
+      </button>
+      <p className="text-[10px] text-muted-foreground text-center">
+        Pobiera: prompt.txt{frames.length > 0 ? ` + ${frames.length} klatek slajdów` : ""}{mp3Url ? " + MP3" : ""}
+        {!mp3Url && recordingUrl ? " (skonwertuj MP3 poniżej aby dodać do paczki)" : ""}
+      </p>
 
       {/* Model recommendation */}
       <div className="bg-primary/5 border border-primary/20 rounded-md p-3">
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          GPT-4o obsługuje audio (MP3) + obrazy (slajdy) w jednym czacie.
-          Otwórz <strong>chat.openai.com</strong> → wybierz <strong>GPT-4o</strong> → załącz pliki.
+          Wgraj wszystkie pobrane pliki do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong> i wyślij.
         </p>
       </div>
 
