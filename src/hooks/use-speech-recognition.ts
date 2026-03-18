@@ -24,8 +24,10 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+type SpeechRecognitionInstance = InstanceType<typeof window.SpeechRecognition> & any;
+
 // Check browser support
-function getSpeechRecognition(): typeof SpeechRecognition | null {
+function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
   const w = window as any;
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
@@ -35,7 +37,7 @@ export function useSpeechRecognition(): SpeechRecognitionState {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [liveText, setLiveText] = useState("");
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const startTimeRef = useRef<number>(0);
   const segmentsRef = useRef<TranscriptSegment[]>([]);
 
