@@ -54,7 +54,7 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
 
     if (frameDirs) {
       for (const dir of frameDirs) {
-        if (dir.name.startsWith(stem + "_part") && dir.id) {
+        if (dir.name.startsWith(stem + "_part")) {
           prefixes.push(`${user.id}/frames/${dir.name}`);
         }
       }
