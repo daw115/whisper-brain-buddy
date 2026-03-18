@@ -231,6 +231,17 @@ export default function MeetingDetail() {
                   />
                 </div>
               )}
+
+              {/* Recording splitter */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <RecordingSplitter
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                    recordingSizeBytes={meeting.recording_size_bytes}
+                  />
+                </div>
+              )}
             </>
           )}
 
