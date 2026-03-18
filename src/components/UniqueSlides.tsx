@@ -103,7 +103,7 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
         <button
           onClick={async () => {
             if (!confirm("Usunąć dane slajdów?")) return;
-            const sources = ["unique-frames", "crop-split", "captions-ocr", "slide-descriptions", "merged"];
+            const sources = ["unique-frames", "crop-split", "pdf-slides", "captions-ocr", "slide-descriptions", "merged"];
             const { error } = await (supabase as any)
               .from("meeting_analyses")
               .delete()
