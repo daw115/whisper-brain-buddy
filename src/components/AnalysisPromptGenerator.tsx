@@ -150,18 +150,15 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
 
   // Filter frames to only those selected by Gemini slide-transcript
   const selectedFrames = useMemo(() => {
-    if (geminiSlides.length === 0) return frames; // no filter if no slide analysis
+    if (geminiSlides.length === 0) return []; // no slides OCR = no frames to include
 
     // Build a set of normalized timestamps from Gemini slides
     const slideTimestamps = new Set<string>();
     for (const slide of geminiSlides) {
-      // Normalize: "01:30" -> "1:30", keep as-is too
       const ts = slide.timestamp;
       slideTimestamps.add(ts);
-      // Also add without leading zero
       const noLeading = ts.replace(/^0+(\d+:)/, "$1");
       slideTimestamps.add(noLeading);
-      // Convert MM:SS to total seconds for matching
       const parts = ts.split(":");
       if (parts.length === 2) {
         const totalSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
@@ -169,16 +166,14 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
       }
     }
 
-    // Match frames whose timestamp (possibly with segment prefix) matches
+    // Match frames whose timestamp matches slide timestamps
     const matched = frames.filter(f => {
       if (!f.timestamp) return false;
-      // Strip segment prefix like "S1/" for matching
       const cleanTs = f.timestamp.replace(/^S\d+\//, "");
       return slideTimestamps.has(cleanTs);
     });
 
-    // If matching yields very few results (< 30% of slides), fall back to all frames
-    return matched.length >= Math.max(1, geminiSlides.length * 0.3) ? matched : frames;
+    return matched;
   }, [frames, geminiSlides]);
 
   function buildPrompt(): string {
