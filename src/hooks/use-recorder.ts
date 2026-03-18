@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { extractFrames, uploadFrames } from "@/lib/frame-extractor";
 
 const MAX_SEGMENT_BYTES = 100 * 1024 * 1024; // 100 MB
 
