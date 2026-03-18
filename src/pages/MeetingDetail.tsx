@@ -15,6 +15,7 @@ import AnalysisComparison from "@/components/AnalysisComparison";
 import RecordingSplitter from "@/components/RecordingSplitter";
 import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
+import TranscribeButton from "@/components/TranscribeButton";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
