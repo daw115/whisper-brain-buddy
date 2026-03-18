@@ -13,8 +13,10 @@ serve(async (req) => {
   }
 
   try {
-    const { meetingId } = await req.json();
+    const { meetingId, mode } = await req.json();
     if (!meetingId) throw new Error("meetingId is required");
+    // mode: "captions" (dialogi z dołu ekranu), "slides" (treść slajdów), "both" (oba + agregacja)
+    const selectedMode = mode || "both";
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -124,144 +126,319 @@ serve(async (req) => {
       if (frames.length >= 25) break;
     }
 
-    console.log(`Loaded ${frames.length} unique frames for slide transcription`);
+    console.log(`Loaded ${frames.length} unique frames for OCR`);
 
-    // 4. Build Gemini request — extract text from slides
-    const contentParts: any[] = [];
-    contentParts.push({
-      type: "text",
-      text: `Jesteś ekspertem OCR do odczytu napisów/dialogów ze spotkań wideo.
+    // Helper: build image content parts
+    function buildImageParts() {
+      const parts: any[] = [];
+      for (const frame of frames) {
+        parts.push({ type: "text", text: `\n--- Klatka @ ${frame.timestamp} ---` });
+        parts.push({
+          type: "image_url",
+          image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` },
+        });
+      }
+      return parts;
+    }
 
-Poniżej ${frames.length} klatek z nagrania spotkania biznesowego (np. Teams, Zoom). Każda klatka ma timestamp.
+    // Helper: call AI
+    async function callAI(contentParts: any[], tools: any[], toolChoice: any) {
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [{ role: "user", content: contentParts }],
+          tools,
+          tool_choice: toolChoice,
+        }),
+      });
+
+      if (!response.ok) {
+        const t = await response.text();
+        console.error("AI gateway error:", response.status, t);
+        if (response.status === 429) {
+          throw { status: 429, message: "Rate limit — spróbuj za chwilę" };
+        }
+        if (response.status === 402) {
+          throw { status: 402, message: "Brak kredytów AI" };
+        }
+        throw { status: 500, message: `AI error: ${response.status}` };
+      }
+
+      const aiResult = await response.json();
+      const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) {
+        console.error("No tool call in response:", JSON.stringify(aiResult).slice(0, 500));
+        throw { status: 500, message: "AI did not return structured result" };
+      }
+      return JSON.parse(toolCall.function.arguments);
+    }
+
+    const results: any = {};
+
+    // ========== CAPTIONS OCR (dialogi z paska na dole) ==========
+    if (selectedMode === "captions" || selectedMode === "both") {
+      console.log("Running CAPTIONS OCR...");
+      const captionParts: any[] = [
+        {
+          type: "text",
+          text: `Jesteś ekspertem OCR do odczytu napisów/dialogów ze spotkań wideo.
+
+Poniżej ${frames.length} klatek z nagrania spotkania biznesowego (np. Teams, Zoom).
 
 ## CO CZYTAĆ
-Na każdej klatce szukaj **napisów/subtitles/dialogów** — to tekst wyświetlany w **dolnej części ekranu**, zazwyczaj na **czarnym lub ciemnym tle** (pasek z napisami automatycznymi, live captions).
+Na każdej klatce szukaj **napisów/subtitles/dialogów** — tekst w **dolnej części ekranu** na **czarnym lub ciemnym tle** (live captions, napisy automatyczne).
 
-⚠️ IGNORUJ treść slajdów/prezentacji w głównej części ekranu — interesują nas TYLKO dialogi/napisy z paska na dole.
-⚠️ Jeśli na klatce NIE MA napisów na dole — pomiń tę klatkę.
+⚠️ IGNORUJ treść slajdów/prezentacji w głównej części ekranu.
+⚠️ Jeśli na klatce NIE MA napisów na dole — pomiń ją.
 
 ## ZADANIE
 1. Odczytaj tekst z paska napisów na dole ekranu
-2. Zidentyfikuj mówcę (jeśli widoczne imię/nazwa przed tekstem)
-3. Połącz fragmenty z kolejnych klatek w spójne zdania (napisy często są ucięte)
-4. Pomiń duplikaty — te same napisy pojawiają się na wielu klatkach
+2. Zidentyfikuj mówcę (jeśli widoczne imię/nazwa)
+3. Połącz fragmenty z kolejnych klatek w spójne zdania
+4. Pomiń duplikaty
 
-## FORMAT WYNIKU
-Chronologiczna transkrypcja dialogów:
-[MM:SS] Mówca: "Pełne zdanie odczytane z napisów"
-
-Jeśli mówca nieznany, użyj "Uczestnik".
-Łącz fragmenty napisów z kolejnych klatek w kompletne wypowiedzi.
+## FORMAT
+[MM:SS] Mówca: "Pełne zdanie"
 
 Poniżej klatki:`,
-    });
+        },
+        ...buildImageParts(),
+      ];
 
-    for (const frame of frames) {
-      contentParts.push({ type: "text", text: `\n--- Slajd @ ${frame.timestamp} ---` });
-      contentParts.push({
-        type: "image_url",
-        image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` },
+      const captionResult = await callAI(captionParts, [{
+        type: "function",
+        function: {
+          name: "save_captions",
+          description: "Save extracted captions/dialogues from video frames",
+          parameters: {
+            type: "object",
+            properties: {
+              transcript: {
+                type: "string",
+                description: "Chronologiczna transkrypcja dialogów z napisów na dole ekranu. Format: [MM:SS] Mówca: tekst.",
+              },
+              entries: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    timestamp: { type: "string" },
+                    speaker: { type: "string" },
+                    text: { type: "string" },
+                  },
+                  required: ["timestamp", "speaker", "text"],
+                  additionalProperties: false,
+                },
+              },
+              total_entries: { type: "number" },
+            },
+            required: ["transcript", "entries", "total_entries"],
+            additionalProperties: false,
+          },
+        },
+      }], { type: "function", function: { name: "save_captions" } });
+
+      console.log(`Captions: ${captionResult.total_entries} entries, ${captionResult.transcript?.length ?? 0} chars`);
+      results.captions = captionResult;
+
+      // Save captions
+      await supabase.from("meeting_analyses").delete().eq("meeting_id", meetingId).eq("source", "captions-ocr");
+      await supabase.from("meeting_analyses").insert({
+        meeting_id: meetingId,
+        source: "captions-ocr",
+        analysis_json: captionResult,
       });
     }
 
-    // 5. Call Gemini
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [{ role: "user", content: contentParts }],
-        tools: [{
+    // ========== SLIDES OCR (treść prezentacji) ==========
+    if (selectedMode === "slides" || selectedMode === "both") {
+      console.log("Running SLIDES OCR...");
+      const slideParts: any[] = [
+        {
+          type: "text",
+          text: `Jesteś ekspertem OCR/analizy slajdów prezentacji.
+
+Poniżej ${frames.length} klatek z nagrania spotkania biznesowego.
+
+## CO CZYTAĆ
+Skup się na **treści prezentacji/slajdów** wyświetlanej w **głównej (centralnej/górnej) części ekranu**.
+
+⚠️ IGNORUJ napisy/subtitles z dolnej części ekranu (czarny pasek z dialogami) — to osobne źródło.
+⚠️ Jeśli slajd się powtarza — pomiń duplikat.
+
+## ZADANIE
+Dla KAŻDEGO unikalnego slajdu:
+1. Odczytaj CAŁĄ treść: tytuły, nagłówki, bullet pointy, tekst, dane liczbowe
+2. Opisz wykresy (osie, wartości, trendy), tabele (odtwórz strukturę), diagramy
+3. Zidentyfikuj typ slajdu (tytułowy, agenda, dane, wykres, tabela, podsumowanie)
+
+## FORMAT
+[MM:SS] 📊 SLAJD (typ): "Tytuł"
+Treść: pełny tekst ze slajdu
+Dane: wartości liczbowe, wykresy, tabele
+
+Poniżej klatki:`,
+        },
+        ...buildImageParts(),
+      ];
+
+      const slideResult = await callAI(slideParts, [{
+        type: "function",
+        function: {
+          name: "save_slides",
+          description: "Save extracted slide content from presentation frames",
+          parameters: {
+            type: "object",
+            properties: {
+              slide_transcript: {
+                type: "string",
+                description: "Chronologiczna transkrypcja treści slajdów. Format: [MM:SS] 📊 SLAJD (typ): treść.",
+              },
+              slides: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    timestamp: { type: "string" },
+                    slide_type: { type: "string" },
+                    title: { type: "string" },
+                    full_text: { type: "string" },
+                    data_values: { type: "string" },
+                  },
+                  required: ["timestamp", "title", "full_text"],
+                  additionalProperties: false,
+                },
+              },
+              total_slides: { type: "number" },
+            },
+            required: ["slide_transcript", "slides", "total_slides"],
+            additionalProperties: false,
+          },
+        },
+      }], { type: "function", function: { name: "save_slides" } });
+
+      console.log(`Slides: ${slideResult.total_slides} slides, ${slideResult.slide_transcript?.length ?? 0} chars`);
+      results.slides = slideResult;
+
+      // Save slides
+      await supabase.from("meeting_analyses").delete().eq("meeting_id", meetingId).eq("source", "slide-transcript");
+      await supabase.from("meeting_analyses").insert({
+        meeting_id: meetingId,
+        source: "slide-transcript",
+        analysis_json: slideResult,
+      });
+    }
+
+    // ========== AGGREGATION (jeśli oba gotowe) ==========
+    if (selectedMode === "both" && results.captions && results.slides) {
+      console.log("Running AGGREGATION...");
+
+      // Also load audio transcript if available
+      const { data: transcriptLines } = await supabase
+        .from("transcript_lines")
+        .select("timestamp, speaker, text, line_order")
+        .eq("meeting_id", meetingId)
+        .order("line_order", { ascending: true })
+        .limit(500);
+
+      const audioTranscript = transcriptLines && transcriptLines.length > 0
+        ? transcriptLines.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
+        : null;
+
+      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz 3 źródła danych z tego samego spotkania:
+
+## ŹRÓDŁO 1: DIALOGI Z NAPISÓW (OCR z paska na dole ekranu)
+${results.captions.transcript || "Brak"}
+
+## ŹRÓDŁO 2: TREŚĆ SLAJDÓW PREZENTACJI (OCR z głównej części ekranu)  
+${results.slides.slide_transcript || "Brak"}
+
+${audioTranscript ? `## ŹRÓDŁO 3: TRANSKRYPT AUDIO (Web Speech API / Whisper)
+${audioTranscript.slice(0, 10000)}` : "## ŹRÓDŁO 3: Brak transkryptu audio"}
+
+## ZADANIE
+Stwórz JEDNĄ zagregowaną transkrypcję chronologiczną łączącą wszystkie źródła:
+
+1. **Dialogi** — użyj napisów OCR jako bazy, uzupełnij/popraw transkryptem audio (jeśli jest)
+2. **Slajdy** — w odpowiednich miejscach (wg timestampów) wstaw znaczniki slajdów:
+   📊 SLAJD: "Tytuł" — kluczowa treść
+3. **Kontekst** — powiąż co mówiono z jakim slajdem, zaznacz:
+   - Co na slajdzie pokrywa się z dialogiem
+   - Co jest TYLKO na slajdzie (dane, wykresy nieomówione ustnie)
+   - Co powiedziano ustnie czego NIE MA na slajdach
+
+Format chronologiczny:
+[MM:SS] Mówca: wypowiedź
+[MM:SS] 📊 SLAJD (typ): treść slajdu | Kontekst: co mówiono
+[MM:SS] 💡 UWAGA: informacja z dialogu bez odpowiednika na slajdzie`;
+
+      const aggregateResult = await callAI(
+        [{ type: "text", text: aggregatePrompt }],
+        [{
           type: "function",
           function: {
-            name: "save_slide_transcript",
-            description: "Save extracted slide transcript from presentation frames",
+            name: "save_aggregated_transcript",
+            description: "Save the aggregated transcript combining captions, slides and audio",
             parameters: {
               type: "object",
               properties: {
-                slide_transcript: {
+                integrated_transcript: {
                   type: "string",
-                  description: "Chronologiczna transkrypcja dialogów odczytanych z napisów na dole ekranu. Format: [MM:SS] Mówca: tekst. Połącz fragmenty w kompletne wypowiedzi.",
+                  description: "Pełna zagregowana transkrypcja łącząca dialogi, slajdy i audio chronologicznie.",
                 },
-                slides: {
+                summary: {
+                  type: "string",
+                  description: "Krótkie podsumowanie spotkania (2-3 zdania) na podstawie wszystkich źródeł.",
+                },
+                slide_dialogue_correlations: {
                   type: "array",
                   items: {
                     type: "object",
                     properties: {
-                      timestamp: { type: "string", description: "Timestamp MM:SS" },
-                      slide_type: { type: "string", description: "Zawsze 'dialog' — napisy z dołu ekranu" },
-                      title: { type: "string", description: "Imię mówcy lub 'Uczestnik'" },
-                      full_text: { type: "string", description: "Pełna treść wypowiedzi odczytana z napisów" },
-                      data_values: { type: "string", description: "null — nie dotyczy dialogów" },
+                      slide_timestamp: { type: "string" },
+                      slide_title: { type: "string" },
+                      discussed_at: { type: "string", description: "Timestamps kiedy omawiano ten slajd" },
+                      extra_verbal_info: { type: "string", description: "Co powiedziano ustnie czego nie ma na slajdzie" },
                     },
-                    required: ["timestamp", "title", "full_text"],
+                    required: ["slide_timestamp", "slide_title"],
                     additionalProperties: false,
                   },
-                  description: "Lista wypowiedzi odczytanych z napisów na dole ekranu",
-                },
-                total_slides: {
-                  type: "number",
-                  description: "Łączna liczba unikalnych wypowiedzi",
                 },
               },
-              required: ["slide_transcript", "slides", "total_slides"],
+              required: ["integrated_transcript", "summary"],
               additionalProperties: false,
             },
           },
         }],
-        tool_choice: { type: "function", function: { name: "save_slide_transcript" } },
-      }),
-    });
+        { type: "function", function: { name: "save_aggregated_transcript" } }
+      );
 
-    if (!response.ok) {
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit — spróbuj za chwilę" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: `AI error: ${response.status}` }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      console.log(`Aggregated: ${aggregateResult.integrated_transcript?.length ?? 0} chars`);
+      results.aggregated = aggregateResult;
+
+      // Save aggregated result
+      await supabase.from("meeting_analyses").delete().eq("meeting_id", meetingId).eq("source", "merged");
+      await supabase.from("meeting_analyses").insert({
+        meeting_id: meetingId,
+        source: "merged",
+        analysis_json: aggregateResult,
       });
     }
 
-    const aiResult = await response.json();
-    const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) {
-      console.error("No tool call in response:", JSON.stringify(aiResult).slice(0, 500));
-      return new Response(JSON.stringify({ error: "AI did not return structured result" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const result = JSON.parse(toolCall.function.arguments);
-    console.log(`Slide transcript: ${result.total_slides} slides, ${result.slide_transcript?.length ?? 0} chars`);
-
-    // 6. Save as meeting_analyses with source "slide-transcript"
-    // Delete previous slide-transcript if exists
-    await supabase.from("meeting_analyses")
-      .delete()
-      .eq("meeting_id", meetingId)
-      .eq("source", "slide-transcript");
-
-    await supabase.from("meeting_analyses").insert({
-      meeting_id: meetingId,
-      source: "slide-transcript",
-      analysis_json: result,
-    });
-
-    return new Response(JSON.stringify({ success: true, result }), {
+    return new Response(JSON.stringify({ success: true, results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (e) {
+  } catch (e: any) {
     console.error("transcribe-slides error:", e);
+    const status = e.status || 500;
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: e.message || (e instanceof Error ? e.message : "Unknown error") }),
+      { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
