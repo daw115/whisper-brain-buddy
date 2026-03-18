@@ -263,7 +263,7 @@ export default function SettingsPage() {
               </>
             )}
 
-            <div className="border-t border-border bg-secondary/50 px-5 py-4">
+            <div className="border-t border-border bg-secondary/50 px-5 py-4 space-y-3">
               <div className="flex gap-2">
                 <input
                   value={newCategoryName}
