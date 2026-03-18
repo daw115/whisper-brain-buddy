@@ -316,14 +316,26 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
                 </div>
               )}
 
-              {/* Integrated transcript */}
-              {aggregated.integrated_transcript && (
+              {/* Conversation transcript */}
+              {(aggregated.conversation_transcript || aggregated.integrated_transcript) && (
                 <div>
                   <h4 className="text-[10px] uppercase text-muted-foreground font-medium tracking-wider mb-2">
-                    Zagregowana transkrypcja
+                    Transkrypcja rozmowy
                   </h4>
                   <pre className="text-[11px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed max-h-[50vh] overflow-y-auto bg-muted/20 border border-border rounded-md p-3">
-                    {aggregated.integrated_transcript}
+                    {aggregated.conversation_transcript || aggregated.integrated_transcript}
+                  </pre>
+                </div>
+              )}
+
+              {/* Slides section */}
+              {aggregated.slides_section && (
+                <div>
+                  <h4 className="text-[10px] uppercase text-muted-foreground font-medium tracking-wider mb-2">
+                    📊 Slajdy i podsumowania
+                  </h4>
+                  <pre className="text-[11px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed max-h-[40vh] overflow-y-auto bg-muted/20 border border-border rounded-md p-3">
+                    {aggregated.slides_section}
                   </pre>
                 </div>
               )}

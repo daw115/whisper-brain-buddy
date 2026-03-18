@@ -48,8 +48,8 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
           .maybeSingle();
         if (data?.analysis_json) {
           const json = data.analysis_json as any;
-          if (json.integrated_transcript) {
-            setIntegratedTranscript(json.integrated_transcript);
+          if (json.conversation_transcript || json.integrated_transcript) {
+            setIntegratedTranscript(json.conversation_transcript || json.integrated_transcript);
             return;
           }
         }

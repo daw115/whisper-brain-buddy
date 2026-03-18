@@ -308,7 +308,9 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
       return `${data.slideDescriptions.slides?.length ?? 0} opisów`;
     }
     if (step === "aggregate" && data.aggregated) {
-      return `${(data.aggregated.integrated_transcript?.length / 1000).toFixed(1)}k znaków`;
+      const convLen = data.aggregated.conversation_transcript?.length || data.aggregated.integrated_transcript?.length || 0;
+      const slidesLen = data.aggregated.slides_section?.length || 0;
+      return `${((convLen + slidesLen) / 1000).toFixed(1)}k znaków`;
     }
     return "gotowe";
   }
