@@ -93,6 +93,38 @@ export type Database = {
           },
         ]
       }
+      meeting_analyses: {
+        Row: {
+          analysis_json: Json
+          created_at: string
+          id: string
+          meeting_id: string
+          source: string
+        }
+        Insert: {
+          analysis_json: Json
+          created_at?: string
+          id?: string
+          meeting_id: string
+          source: string
+        }
+        Update: {
+          analysis_json?: Json
+          created_at?: string
+          id?: string
+          meeting_id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_analyses_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meeting_participants: {
         Row: {
           id: string
