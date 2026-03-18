@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Download, Image, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import FrameRegenerator from "@/components/FrameRegenerator";
