@@ -42,8 +42,11 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (data?.analysis_json?.slide_transcript) {
-        setSlideTranscript(data.analysis_json.slide_transcript);
+      if (data?.analysis_json) {
+        const json = data.analysis_json as any;
+        if (json.slide_transcript) {
+          setSlideTranscript(json.slide_transcript);
+        }
       }
     } catch {}
   }
