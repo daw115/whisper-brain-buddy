@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
-import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2, Images, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Progress } from "@/components/ui/progress";
 import FrameRegenerator from "@/components/FrameRegenerator";
+import type { ProgressInfo } from "@/lib/frame-extractor";
 
 interface SegmentFile {
   name: string;
