@@ -54,7 +54,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
       if (mode === "crop-split") {
         // Batched crop-split: loop until all frames processed
         let offset = 0;
-        const batchSize = 5;
+        const batchSize = 20;
         let lastResult: any = null;
 
         while (true) {
