@@ -79,12 +79,18 @@ serve(async (req) => {
     }
 
     async function saveAnalysis(source: string, json: any) {
-      const { error } = await supabase.from("meeting_analyses").insert({
-        meeting_id: meetingId, source, analysis_json: json,
-      });
-      if (error) {
-        console.error(`Failed to save ${source}:`, error);
-        throw new Error(`Failed to save ${source}`);
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const { error } = await supabase.from("meeting_analyses").insert({
+          meeting_id: meetingId, source, analysis_json: json,
+        });
+        if (!error) return;
+        console.error(`Failed to save ${source} (attempt ${attempt}/${maxRetries}):`, error);
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        } else {
+          throw new Error(`Failed to save ${source} after ${maxRetries} attempts`);
+        }
       }
     }
 
