@@ -273,6 +273,17 @@ export default function SettingsPage() {
                   className="flex-1 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
                   maxLength={100}
                 />
+              </div>
+              <div className="flex items-center gap-1.5">
+                {CATEGORY_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    onClick={() => setNewCategoryColor(c.value)}
+                    className={`w-6 h-6 rounded-full transition-all ${newCategoryColor === c.value ? "ring-2 ring-offset-2 ring-offset-secondary scale-110" : "hover:scale-110"}`}
+                    style={{ backgroundColor: c.value, ringColor: c.value }}
+                    title={c.name}
+                  />
+                ))}
                 <button
                   onClick={createCategory}
                   disabled={creatingCategory || !newCategoryName.trim()}
