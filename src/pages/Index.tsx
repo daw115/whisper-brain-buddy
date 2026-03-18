@@ -8,6 +8,7 @@ import ChatPage from "@/pages/ChatPage";
 import ActionsPage from "@/pages/ActionsPage";
 import SearchPage from "@/pages/SearchPage";
 import SettingsPage from "@/pages/SettingsPage";
+import UploadPage from "@/pages/UploadPage";
 import { useRecorder } from "@/hooks/use-recorder";
 import { useCreateMeeting } from "@/hooks/use-meetings";
 import { useAuth } from "@/hooks/use-auth";
@@ -73,6 +74,7 @@ export default function Index() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="actions" element={<ActionsPage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="upload" element={<UploadPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Routes>
       </main>

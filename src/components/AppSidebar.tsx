@@ -4,6 +4,7 @@ import {
   Search,
   MessageSquare,
   ListChecks,
+  Upload,
   Settings,
   Brain,
   LogOut,
@@ -15,6 +16,7 @@ const navItems = [
   { icon: Search, label: "Search", path: "/search" },
   { icon: MessageSquare, label: "Ask AI", path: "/chat" },
   { icon: ListChecks, label: "Action Items", path: "/actions" },
+  { icon: Upload, label: "Batch Upload", path: "/upload" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 
