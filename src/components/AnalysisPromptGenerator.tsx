@@ -428,14 +428,20 @@ ${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu
       <div className="bg-muted/30 border border-border rounded-md p-3 space-y-1">
         <p className="text-[11px] font-medium text-foreground">📊 Dostępne dane:</p>
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
-          {hasTranscript && (
+          {integratedTranscript && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              Transkrypt: {transcriptLines.length} linii
+              ✨ Zagregowana transkrypcja (audio + slajdy) — najlepsza jakość
+            </li>
+          )}
+          {!integratedTranscript && hasTranscript && (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              Transkrypt audio: {transcriptLines.length} linii
               {[...new Set(transcriptLines.map((l) => l.speaker))].some((s) => s.startsWith("Seg")) && " (z wielu segmentów)"}
             </li>
           )}
-          {!hasTranscript && (
+          {!integratedTranscript && !hasTranscript && (
             <li className="text-muted-foreground/60">✗ Brak transkryptu — wgraj MP3 do ChatGPT</li>
           )}
           {recordingUrl && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> Nagranie dostępne do konwersji MP3</li>}
