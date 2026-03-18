@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain } from "lucide-react";
-import { useMeeting } from "@/hooks/use-meetings";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain, FolderOpen } from "lucide-react";
+import { useMeeting, useCategories } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
@@ -12,6 +12,7 @@ import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
 import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
+import { toast } from "sonner";
 
 export default function MeetingDetail() {
   const { id } = useParams();
