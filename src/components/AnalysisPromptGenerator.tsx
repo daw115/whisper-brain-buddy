@@ -385,9 +385,8 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
     );
   }
 
-  const transcriptLines = meeting.transcript_lines || [];
-  const hasTranscript = transcriptLines.length > 0;
   const hasGeminiFilter = geminiSlides.length > 0 && selectedFrames.length < frames.length;
+  const hasIntegrated = !!integratedTranscript;
 
   return (
     <div className="space-y-4">
@@ -400,7 +399,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
       {/* One-click ZIP download */}
       <button
         onClick={handleDownloadZip}
-        disabled={downloading || convertingMp3}
+        disabled={downloading}
         className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 press-effect"
       >
         {downloading ? (
@@ -413,94 +412,56 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
             <Archive className="w-4 h-4" />
             Pobierz ZIP ({[
               "prompt",
+              hasIntegrated ? "transkrypcja" : null,
               selectedFrames.length > 0 ? `${selectedFrames.length} slajdów` : null,
-              mp3Url ? "MP3" : null,
             ].filter(Boolean).join(" + ")})
           </>
         )}
       </button>
-      <p className="text-[10px] text-muted-foreground text-center">
-        Jeden plik ZIP: prompt.txt
-        {selectedFrames.length > 0 ? ` + ${selectedFrames.length} slajdów${hasGeminiFilter ? " (wybrane przez Gemini)" : ""}` : ""}
-        {mp3Url ? " + MP3" : ""}
-        {!mp3Url && recordingUrl ? " (skonwertuj MP3 poniżej aby dodać)" : ""}
-      </p>
+
+      {!hasIntegrated && !selectedFrames.length && (
+        <p className="text-[10px] text-muted-foreground/60 text-center">
+          ⚠ Najpierw uruchom OCR (dialogi + slajdy + agregacja) aby przygotować dane
+        </p>
+      )}
 
       {/* Model recommendation */}
       <div className="bg-primary/5 border border-primary/20 rounded-md p-3">
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          Rozpakuj ZIP i wgraj wszystkie pliki do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
+          Rozpakuj ZIP i wgraj <strong>wszystkie pliki</strong> do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
         </p>
       </div>
 
       {/* Data summary */}
       <div className="bg-muted/30 border border-border rounded-md p-3 space-y-1">
-        <p className="text-[11px] font-medium text-foreground">📊 Zawartość paczki:</p>
+        <p className="text-[11px] font-medium text-foreground">📦 Zawartość paczki:</p>
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
-          {integratedTranscript && (
+          <li className="flex items-center gap-1">
+            <Check className="w-3 h-3 text-primary" />
+            prompt.txt — instrukcja analizy (identyczna jak Gemini)
+          </li>
+          {hasIntegrated && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              ✨ Zagregowana transkrypcja (audio + slajdy) — w prompcie
+              ✨ transkrypcja_zagregowana.txt — dialogi + slajdy chronologicznie
             </li>
           )}
-          {!integratedTranscript && hasTranscript && (
-            <li className="flex items-center gap-1">
-              <Check className="w-3 h-3 text-primary" />
-              Transkrypt audio: {transcriptLines.length} linii — w prompcie
-            </li>
-          )}
-          {!integratedTranscript && !hasTranscript && (
-            <li className="text-muted-foreground/60">✗ Brak transkryptu — wgraj MP3 do ChatGPT</li>
+          {!hasIntegrated && (
+            <li className="text-muted-foreground/60">✗ Brak zagregowanej transkrypcji — uruchom OCR</li>
           )}
           {selectedFrames.length > 0 && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              {selectedFrames.length} slajdów
-              {hasGeminiFilter && ` (z ${frames.length} klatek — wybrane przez Gemini)`}
+              {selectedFrames.length} slajdów prezentacji
+              {hasGeminiFilter && ` (z ${frames.length} klatek)`}
             </li>
           )}
-          {mp3Url && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> MP3 ({mp3Size} MB)</li>}
-          {recordingUrl && !mp3Url && <li className="text-muted-foreground/60">⚠ MP3 nieskonwertowany — skonwertuj poniżej</li>}
+          {selectedFrames.length === 0 && (
+            <li className="text-muted-foreground/60">✗ Brak slajdów — uruchom OCR</li>
+          )}
         </ul>
       </div>
-
-      {/* MP3 conversion */}
-      {recordingUrl && (
-        <div className="border border-border rounded-md p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-              <Music className="w-3.5 h-3.5" />
-              Przygotuj MP3
-            </span>
-            {mp3Url && <Check className="w-3.5 h-3.5 text-primary" />}
-          </div>
-
-          {mp3Url ? (
-            <p className="text-[10px] text-primary flex items-center gap-1">
-              <Check className="w-3 h-3" /> MP3 gotowy ({mp3Size} MB) — zostanie dodany do ZIP
-            </p>
-          ) : (
-            <button
-              onClick={handleConvertMp3}
-              disabled={convertingMp3}
-              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-            >
-              {convertingMp3 ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Konwertuję…
-                </>
-              ) : (
-                <>
-                  <Music className="w-3.5 h-3.5" />
-                  Konwertuj nagranie do MP3
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Selected frames preview */}
       {selectedFrames.length > 0 && (
@@ -576,7 +537,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
           <li>Kliknij <strong>Pobierz ZIP</strong> powyżej</li>
           <li>Rozpakuj archiwum</li>
           <li>Otwórz <strong>chat.openai.com</strong> → model <strong>GPT-4o</strong></li>
-          <li>Wgraj <strong>wszystkie pliki</strong> z rozpakowanego folderu</li>
+          <li>Wgraj <strong>wszystkie pliki</strong> z rozpakowanego folderu (prompt + transkrypcja + slajdy)</li>
           <li>Wyślij i poczekaj na wynik JSON</li>
           <li>Wklej JSON w sekcji <strong>"Importuj wynik analizy"</strong> poniżej</li>
         </ol>
