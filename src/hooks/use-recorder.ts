@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { extractFrames, uploadFrames } from "@/lib/frame-extractor";
 
 export interface RecordingState {
   isRecording: boolean;
@@ -156,6 +157,28 @@ export function useRecorder(): RecordingState {
             duration: 5000,
           });
           setLastRecording({ blob, filename, url: signedUrl });
+
+          // Extract and upload slide frames in background
+          toast.loading("Extracting slide frames…", { id: "frames" });
+          try {
+            const frames = await extractFrames(blob, 30, 30);
+            if (frames.length > 0) {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                const stem = filename.replace(/\.[^.]+$/, "");
+                await uploadFrames(supabase, user.id, stem, frames);
+                toast.success(`${frames.length} slide frames captured`, {
+                  id: "frames",
+                  duration: 4000,
+                });
+              }
+            } else {
+              toast.dismiss("frames");
+            }
+          } catch (err) {
+            console.error("Frame extraction error:", err);
+            toast.dismiss("frames");
+          }
         } else {
           // Fallback: download locally
           const url = URL.createObjectURL(blob);

@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
+import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -151,6 +152,11 @@ export default function MeetingDetail() {
               )}
             </>
           )}
+
+          {/* Analysis Prompt Generator */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <AnalysisPromptGenerator meeting={meeting} />
+          </div>
         </div>
 
         {/* Center: Transcript */}
