@@ -23,6 +23,7 @@ export async function extractFrames(
   intervalSeconds = 30,
   maxFrames = 30,
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<ExtractedFrame[]> {
   const url = URL.createObjectURL(videoBlob);
 
@@ -34,35 +35,35 @@ export async function extractFrames(
 
     onProgress?.({ phase: "loading", current: 0, total: 1, percent: 0 });
 
-    // Wait for metadata
     await new Promise<void>((resolve, reject) => {
       video.onloadedmetadata = () => resolve();
       video.onerror = () => reject(new Error("Failed to load video"));
       setTimeout(() => reject(new Error("Video load timeout")), 30_000);
     });
 
+    if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
+
     onProgress?.({ phase: "loading", current: 1, total: 1, percent: 100 });
 
     const duration = video.duration;
     if (!duration || !isFinite(duration)) return [];
 
-    // Calculate timestamps to capture
     const timestamps: number[] = [];
     for (let t = 5; t < duration && timestamps.length < maxFrames; t += intervalSeconds) {
       timestamps.push(t);
     }
-    // Always capture last frame area
     if (duration > 10 && timestamps[timestamps.length - 1] < duration - 10) {
       timestamps.push(Math.max(0, duration - 5));
     }
 
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d")!;
-
     const frames: ExtractedFrame[] = [];
     let prevHash = "";
 
     for (let i = 0; i < timestamps.length; i++) {
+      if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
+
       const ts = timestamps[i];
       onProgress?.({
         phase: "extracting",
@@ -103,7 +104,6 @@ export async function extractFrames(
   }
 }
 
-/** Quick hash of pixel data for change detection */
 function quickHash(data: Uint8ClampedArray): string {
   let hash = 0;
   for (let i = 0; i < data.length; i += 40) {
@@ -112,17 +112,19 @@ function quickHash(data: Uint8ClampedArray): string {
   return hash.toString(36);
 }
 
-/** Upload frames to storage, returns paths */
 export async function uploadFrames(
   supabase: any,
   userId: string,
   recordingStem: string,
   frames: ExtractedFrame[],
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const paths: string[] = [];
 
   for (let i = 0; i < frames.length; i++) {
+    if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
+
     onProgress?.({
       phase: "uploading",
       current: i + 1,
