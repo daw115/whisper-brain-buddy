@@ -66,6 +66,7 @@ export function useRecorder(): RecordingState {
   const isSplittingRef = useRef(false);
   const mimeTypeRef = useRef("video/webm");
   const baseFilenameRef = useRef("");
+  const cumulativeFrameOffsetRef = useRef(0);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) {
