@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { extractFrames, uploadFrames } from "@/lib/frame-extractor";
 
 const MAX_SEGMENT_BYTES = 100 * 1024 * 1024; // 100 MB
 
@@ -66,6 +65,7 @@ export function useRecorder(): RecordingState {
   const isSplittingRef = useRef(false);
   const mimeTypeRef = useRef("video/webm");
   const baseFilenameRef = useRef("");
+  const cumulativeFrameOffsetRef = useRef(0);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) {
@@ -85,19 +85,23 @@ export function useRecorder(): RecordingState {
     accumulatedSizeRef.current = 0;
     segmentIndexRef.current = 0;
     isSplittingRef.current = false;
+    cumulativeFrameOffsetRef.current = 0;
   }, []);
 
   const extractFramesFromSegment = useCallback(async (blob: Blob, filename: string) => {
+    const { extractFramesWithDuration, uploadFrames: uploadFn } = await import("@/lib/frame-extractor");
     const toastId = `frames-${filename}`;
     try {
       toast.loading(`Klatki z ${filename}…`, { id: toastId });
-      const frames = await extractFrames(blob, 30, 30);
+      const offset = cumulativeFrameOffsetRef.current;
+      const { frames, durationSec } = await extractFramesWithDuration(blob, 30, 30, undefined, undefined, offset);
+      cumulativeFrameOffsetRef.current += durationSec;
       if (frames.length > 0) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const segStem = filename.replace(/\.[^.]+$/, "");
-          await uploadFrames(supabase, user.id, segStem, frames);
-          toast.success(`${frames.length} klatek z ${filename}`, { id: toastId, duration: 3000 });
+          await uploadFn(supabase, user.id, segStem, frames);
+          toast.success(`${frames.length} klatek z ${filename} (offset ${Math.round(offset)}s)`, { id: toastId, duration: 3000 });
           return;
         }
       }
