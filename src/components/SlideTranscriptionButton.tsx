@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Scissors, Eye, Merge, Loader2, Check, AlertCircle, ScanText, ImageIcon } from "lucide-react";
+import { Scissors, Eye, Merge, Loader2, Check, AlertCircle, ScanText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -43,28 +43,61 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
   const [runningStep, setRunningStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const [completedSteps, setCompletedSteps] = useState<Record<string, any>>({});
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
 
   async function runStep(mode: string) {
     setError(null);
     setRunningStep(mode as Step);
+    setBatchProgress(null);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
-        body: { meetingId, mode },
-      });
-      if (fnError) throw new Error(fnError.message || "Błąd wywołania");
-      if (data?.error) throw new Error(data.error);
+      if (mode === "crop-split") {
+        // Batched crop-split: loop until all frames processed
+        let offset = 0;
+        const batchSize = 30;
+        let lastResult: any = null;
 
-      const stepResults = data?.results ?? {};
-      setCompletedSteps(prev => ({ ...prev, [mode]: stepResults }));
-      onComplete?.(stepResults);
+        while (true) {
+          setBatchProgress(`Przetwarzam klatki od ${offset}...`);
+          const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
+            body: { meetingId, mode, batchOffset: offset, batchSize },
+          });
+          if (fnError) throw new Error(fnError.message || "Błąd wywołania");
+          if (data?.error) throw new Error(data.error);
 
-      toast.success(`Krok ${stepConfig[mode as keyof typeof stepConfig]?.stepNum}: gotowe!`);
+          lastResult = data?.results?.cropSplit;
+          if (!lastResult) throw new Error("Brak wyników crop-split");
+
+          const processed = lastResult.total_frames ?? 0;
+          const total = lastResult.frames_total ?? processed;
+          setBatchProgress(`${processed}/${total} klatek, ${lastResult.total_unique_slides} slajdów`);
+
+          if (!lastResult.has_more) break;
+          offset = lastResult.next_offset;
+        }
+
+        setCompletedSteps(prev => ({ ...prev, [mode]: { cropSplit: lastResult } }));
+        onComplete?.({ cropSplit: lastResult });
+        toast.success(`Krok 3: gotowe! ${lastResult.total_unique_slides} slajdów z ${lastResult.total_frames} klatek`);
+      } else {
+        // Non-batched steps
+        const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
+          body: { meetingId, mode },
+        });
+        if (fnError) throw new Error(fnError.message || "Błąd wywołania");
+        if (data?.error) throw new Error(data.error);
+
+        const stepResults = data?.results ?? {};
+        setCompletedSteps(prev => ({ ...prev, [mode]: stepResults }));
+        onComplete?.(stepResults);
+        toast.success(`Krok ${stepConfig[mode as keyof typeof stepConfig]?.stepNum}: gotowe!`);
+      }
     } catch (err: any) {
       setError(err.message || "Nieznany błąd");
       toast.error("Błąd: " + (err.message || "nieznany"));
     } finally {
       setRunningStep("idle");
+      setBatchProgress(null);
     }
   }
 
@@ -121,6 +154,9 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
                 {config.stepNum}. {isThisRunning ? `${config.label}…` : config.label}
               </span>
             </Button>
+            {isThisRunning && batchProgress && (
+              <p className="text-[9px] text-muted-foreground pl-6 animate-pulse">⏳ {batchProgress}</p>
+            )}
             {status && (
               <p className="text-[9px] text-muted-foreground pl-6">✓ {status}</p>
             )}
