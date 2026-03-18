@@ -25,10 +25,28 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [mp3Url, setMp3Url] = useState<string | null>(null);
   const [mp3Size, setMp3Size] = useState<string | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
+  const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
 
   useEffect(() => {
     loadFrames();
+    loadSlideTranscript();
   }, [meeting.id, meeting.recording_filename, framesVersion]);
+
+  async function loadSlideTranscript() {
+    try {
+      const { data } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meeting.id)
+        .eq("source", "slide-transcript")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.analysis_json?.slide_transcript) {
+        setSlideTranscript(data.analysis_json.slide_transcript);
+      }
+    } catch {}
+  }
 
   async function loadFrames() {
     setLoading(true);
