@@ -15,6 +15,7 @@ import FrameGallery from "@/components/FrameGallery";
 import RecordingPanel from "@/components/RecordingPanel";
 import SegmentToolbox from "@/components/SegmentToolbox";
 import AIInputPreview from "@/components/AIInputPreview";
+import SlideInsightsPanel from "@/components/SlideInsightsPanel";
 import { toast } from "sonner";
 import { useBuildKnowledge } from "@/hooks/use-knowledge";
 
