@@ -616,7 +616,7 @@ Format: 📊 [MM:SS] "Tytuł" — opis i podsumowanie`;
         { type: "function", function: { name: "save_aggregated_transcript" } },
       );
 
-      console.log(`Aggregated: ${aggregateResult.integrated_transcript?.length ?? 0} chars, ${aggregateResult.slide_markers?.length ?? 0} slide markers`);
+      console.log(`Aggregated: conversation=${aggregateResult.conversation_transcript?.length ?? 0} chars, slides=${aggregateResult.slides_section?.length ?? 0} chars, ${aggregateResult.slide_markers?.length ?? 0} slide markers`);
       await saveAnalysis("merged", aggregateResult);
       results.aggregated = aggregateResult;
     }
