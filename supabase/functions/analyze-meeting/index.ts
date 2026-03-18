@@ -133,21 +133,28 @@ serve(async (req) => {
     const hasTranscript = transcriptText.length > 0;
     const hasSlides = frames.length > 0;
 
-    // 3b. Load slide-transcript if available (from transcribe-slides function)
+    // 3b. Load captions-ocr and merged transcript if available
     let slideTranscriptText = "";
-    const { data: slideAnalysis } = await supabase
-      .from("meeting_analyses")
-      .select("analysis_json")
-      .eq("meeting_id", meetingId)
-      .eq("source", "slide-transcript")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    for (const src of ["merged", "captions-ocr"]) {
+      const { data: ocrAnalysis } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meetingId)
+        .eq("source", src)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (slideAnalysis?.analysis_json) {
-      const stData = slideAnalysis.analysis_json as any;
-      if (stData.slide_transcript) {
-        slideTranscriptText = stData.slide_transcript;
+      if (ocrAnalysis?.analysis_json) {
+        const json = ocrAnalysis.analysis_json as any;
+        if (json.integrated_transcript) {
+          slideTranscriptText = json.integrated_transcript;
+          break;
+        }
+        if (json.transcript) {
+          slideTranscriptText = json.transcript;
+          break;
+        }
       }
     }
     const hasSlideTranscript = slideTranscriptText.length > 0;
