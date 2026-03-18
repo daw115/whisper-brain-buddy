@@ -130,6 +130,61 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "change_pin") {
+      if (!user_id || !pin_code || pin_code.length !== 4 || !/^\d{4}$/.test(pin_code)) {
+        return new Response(JSON.stringify({ error: "user_id and new 4-digit PIN required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Check PIN uniqueness
+      const { data: existing } = await supabaseAdmin
+        .from("pin_users")
+        .select("id")
+        .eq("pin_code", pin_code)
+        .neq("id", user_id)
+        .maybeSingle();
+
+      if (existing) {
+        return new Response(JSON.stringify({ error: "PIN already in use" }), {
+          status: 409,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Get the auth user id
+      const { data: pinUser } = await supabaseAdmin
+        .from("pin_users")
+        .select("auth_user_id")
+        .eq("id", user_id)
+        .single();
+
+      if (!pinUser) {
+        return new Response(JSON.stringify({ error: "User not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Update password in auth
+      const newPassword = `cerebro-pin-${pin_code}-${crypto.randomUUID().slice(0, 8)}`;
+      await supabaseAdmin.auth.admin.updateUserById(pinUser.auth_user_id, {
+        password: newPassword,
+        user_metadata: { pin_password: newPassword },
+      });
+
+      // Update pin_code in table
+      await supabaseAdmin
+        .from("pin_users")
+        .update({ pin_code })
+        .eq("id", user_id);
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "login") {
       if (!pin_code || pin_code.length !== 4) {
         return new Response(JSON.stringify({ error: "4-digit PIN required" }), {

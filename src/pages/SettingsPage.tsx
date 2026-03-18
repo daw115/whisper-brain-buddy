@@ -46,6 +46,9 @@ export default function SettingsPage() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState(CATEGORY_COLORS[0].value);
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [editingPinId, setEditingPinId] = useState<string | null>(null);
+  const [editingPinValue, setEditingPinValue] = useState("");
+  const [savingPin, setSavingPin] = useState(false);
 
   useEffect(() => {
     loadPinUsers();
