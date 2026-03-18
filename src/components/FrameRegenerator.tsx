@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { RefreshCw, Loader2, Check, Settings2 } from "lucide-react";
+import { RefreshCw, Loader2, Settings2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Progress } from "@/components/ui/progress";
+import type { ProgressInfo } from "@/lib/frame-extractor";
 
 interface Props {
   recordingUrl: string;
@@ -9,39 +11,48 @@ interface Props {
   onComplete?: (count: number) => void;
 }
 
+const phaseLabels: Record<string, string> = {
+  loading: "Ładowanie wideo…",
+  extracting: "Wyodrębnianie klatek",
+  uploading: "Przesyłanie klatek",
+};
+
 export default function FrameRegenerator({ recordingUrl, recordingFilename, onComplete }: Props) {
   const [interval, setInterval] = useState(30);
   const [customInterval, setCustomInterval] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [progress, setProgress] = useState("");
+  const [progressInfo, setProgressInfo] = useState<ProgressInfo | null>(null);
+
+  const overallPercent = (() => {
+    if (!progressInfo) return 0;
+    const weights = { loading: 5, extracting: 70, uploading: 25 };
+    const offsets = { loading: 0, extracting: 5, uploading: 75 };
+    const w = weights[progressInfo.phase] || 0;
+    const o = offsets[progressInfo.phase] || 0;
+    return Math.round(o + (progressInfo.percent / 100) * w);
+  })();
 
   async function handleRegenerate() {
     setGenerating(true);
-    setProgress("Pobieranie nagrania…");
+    setProgressInfo({ phase: "loading", current: 0, total: 1, percent: 0 });
 
     try {
-      // Fetch video blob
       const res = await fetch(recordingUrl);
       const videoBlob = await res.blob();
 
-      setProgress("Wyodrębnianie klatek…");
-
-      // Dynamic import frame extractor
       const { extractFrames, uploadFrames } = await import("@/lib/frame-extractor");
 
-      const frames = await extractFrames(videoBlob, interval, 50);
+      const frames = await extractFrames(videoBlob, interval, 50, setProgressInfo);
       if (frames.length === 0) {
         toast.warning("Nie udało się wyodrębnić żadnych klatek");
         return;
       }
 
-      setProgress(`Przesyłanie ${frames.length} klatek…`);
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Nie zalogowano");
 
       const stem = recordingFilename.replace(/\.[^.]+$/, "");
-      const paths = await uploadFrames(supabase, user.id, stem, frames);
+      const paths = await uploadFrames(supabase, user.id, stem, frames, setProgressInfo);
 
       toast.success(`Wygenerowano ${paths.length} klatek (co ${interval}s)`);
       onComplete?.(paths.length);
@@ -50,7 +61,7 @@ export default function FrameRegenerator({ recordingUrl, recordingFilename, onCo
       toast.error("Błąd: " + (err.message || "nieznany"));
     } finally {
       setGenerating(false);
-      setProgress("");
+      setProgressInfo(null);
     }
   }
 
@@ -95,6 +106,19 @@ export default function FrameRegenerator({ recordingUrl, recordingFilename, onCo
         ))}
       </div>
 
+      {generating && progressInfo && (
+        <div className="space-y-1.5 pt-1">
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>
+              {phaseLabels[progressInfo.phase] || progressInfo.phase}
+              {progressInfo.phase !== "loading" && ` (${progressInfo.current}/${progressInfo.total})`}
+            </span>
+            <span className="font-mono">{overallPercent}%</span>
+          </div>
+          <Progress value={overallPercent} className="h-1.5" />
+        </div>
+      )}
+
       <button
         onClick={handleRegenerate}
         disabled={generating}
@@ -103,7 +127,7 @@ export default function FrameRegenerator({ recordingUrl, recordingFilename, onCo
         {generating ? (
           <>
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            {progress}
+            Przetwarzanie…
           </>
         ) : (
           <>
