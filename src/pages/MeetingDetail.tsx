@@ -5,6 +5,7 @@ import { useMeeting, useCategories, useUpdateMeeting, useDeleteMeeting } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import TranscriptView from "@/components/TranscriptView";
+import TranscriptTabs from "@/components/TranscriptTabs";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
