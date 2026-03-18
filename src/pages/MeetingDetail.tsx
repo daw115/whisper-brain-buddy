@@ -21,6 +21,22 @@ export default function MeetingDetail() {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const { data: categories = [] } = useCategories();
+  const queryClient = useQueryClient();
+
+  const updateCategory = async (categoryId: string | null) => {
+    const { error } = await supabase
+      .from("meetings")
+      .update({ category_id: categoryId })
+      .eq("id", id!);
+    if (error) {
+      toast.error("Nie udało się zmienić kategorii");
+    } else {
+      toast.success("Kategoria zmieniona");
+      queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    }
+  };
 
   // Load analyses from meeting_analyses table
   const { data: analyses = [], refetch: refetchAnalyses } = useQuery({
