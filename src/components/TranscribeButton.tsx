@@ -1,8 +1,9 @@
 import { useState, useRef } from "react";
-import { FileAudio, Loader2, Wifi, WifiOff } from "lucide-react";
+import { FileAudio, Loader2, Wifi, WifiOff, Languages } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
+import { TRANSCRIPTION_LANGUAGES, type TranscriptionLanguage } from "@/components/AudioExtractor";
 
 interface Props {
   meetingId: string;
@@ -26,6 +27,7 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
   const [convertProgress, setConvertProgress] = useState(0);
   const [transcribeProgress, setTranscribeProgress] = useState(0);
   const [mode, setMode] = useState<"offline" | "online">("offline");
+  const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const ffmpegRef = useRef<any>(null);
 
   async function convertToWav(): Promise<Float32Array> {
@@ -99,7 +101,7 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
       toast.loading("Transkrypcja offline w toku…", { id: "transcribe" });
 
       const result = await transcriber(audioData, {
-        language: "polish",
+        language: language === "pl" ? "polish" : language === "en" ? "english" : language === "de" ? "german" : language === "fr" ? "french" : language === "es" ? "spanish" : language === "it" ? "italian" : language === "pt" ? "portuguese" : language === "uk" ? "ukrainian" : language === "ru" ? "russian" : language === "cs" ? "czech" : "polish",
         task: "transcribe",
         return_timestamps: true,
         chunk_length_s: 30,
@@ -198,7 +200,7 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
 
       const base64 = uint8ToBase64(mp3Data);
       const { data, error } = await supabase.functions.invoke("transcribe-audio", {
-        body: { audioBase64: base64, mimeType: "audio/mpeg", language: "pl" },
+        body: { audioBase64: base64, mimeType: "audio/mpeg", language },
       });
 
       if (error) throw new Error(error.message || "Błąd transkrypcji");
@@ -289,6 +291,21 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
           <Wifi className="w-3 h-3" />
           Online (Gemini)
         </button>
+      </div>
+
+      {/* Language selector */}
+      <div className="flex items-center gap-1.5">
+        <Languages className="w-3 h-3 text-muted-foreground" />
+        <select
+          value={language}
+          onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
+          disabled={busy}
+          className="text-[10px] bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground"
+        >
+          {TRANSCRIPTION_LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
       </div>
 
       {mode === "offline" && !busy && (

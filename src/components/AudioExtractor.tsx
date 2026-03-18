@@ -1,8 +1,23 @@
 import { useState, useRef, useEffect } from "react";
-import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio } from "lucide-react";
+import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
+
+export const TRANSCRIPTION_LANGUAGES = [
+  { code: "pl", label: "Polski" },
+  { code: "en", label: "English" },
+  { code: "de", label: "Deutsch" },
+  { code: "fr", label: "Français" },
+  { code: "es", label: "Español" },
+  { code: "uk", label: "Українська" },
+  { code: "ru", label: "Русский" },
+  { code: "it", label: "Italiano" },
+  { code: "pt", label: "Português" },
+  { code: "cs", label: "Čeština" },
+] as const;
+
+export type TranscriptionLanguage = typeof TRANSCRIPTION_LANGUAGES[number]["code"];
 
 interface AudioSegment {
   name: string;
@@ -45,6 +60,7 @@ export default function AudioExtractor({
   const [chunkMB, setChunkMB] = useState(20);
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [splitProgress, setSplitProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const ffmpegRef = useRef<any>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
@@ -331,10 +347,25 @@ export default function AudioExtractor({
 
   return (
     <div className="space-y-3">
-      <h3 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider flex items-center gap-1.5">
-        <FileAudio className="w-3.5 h-3.5" />
-        Audio (MP3)
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider flex items-center gap-1.5">
+          <FileAudio className="w-3.5 h-3.5" />
+          Audio (MP3)
+        </h3>
+        <div className="flex items-center gap-1.5">
+          <Languages className="w-3 h-3 text-muted-foreground" />
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
+            disabled={busy}
+            className="text-[10px] bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground"
+          >
+            {TRANSCRIPTION_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>{l.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* Main MP3 */}
       {mainAudio ? (
