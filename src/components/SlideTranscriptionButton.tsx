@@ -14,7 +14,7 @@ interface Props {
 
 type Step = "idle" | "crop-split" | "ocr-captions" | "describe-slides" | "aggregate";
 
-const stepConfig: Record<Exclude<Step, "idle">, { label: string; description: string; icon: typeof Scissors; stepNum: number }> = {
+const stepConfig: Record<"crop-split" | "ocr-captions" | "aggregate", { label: string; description: string; icon: typeof Scissors; stepNum: number }> = {
   "crop-split": {
     label: "Deduplikuj klatki",
     description: "Hashuje klatki i usuwa duplikaty (lokalnie w przeglądarce)",
@@ -26,12 +26,6 @@ const stepConfig: Record<Exclude<Step, "idle">, { label: string; description: st
     description: "Odczytuje tekst z pasków napisów → transkrypcja",
     icon: ScanText,
     stepNum: 4,
-  },
-  "describe-slides": {
-    label: "Opisz slajdy",
-    description: "Analizuje treść unikalnych slajdów prezentacji",
-    icon: Eye,
-    stepNum: 5,
   },
   aggregate: {
     label: "Agreguj transkrypcję",
