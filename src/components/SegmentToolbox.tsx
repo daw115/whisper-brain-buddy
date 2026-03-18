@@ -390,7 +390,6 @@ export default function SegmentToolbox({
     let allLines: { timestamp: string; speaker: string; text: string }[] = [];
     let cumulativeOffsetSec = 0;
     let transcriber: any = null;
-    let transcriber: any = null;
 
     if (transcribeMode === "offline") {
       toast.loading("Ładowanie modelu Whisper (~50 MB)…", { id: "batch-transcribe" });
