@@ -395,7 +395,7 @@ Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych sc
         throw { status: 400, message: "Upload a PDF or run crop-split first" };
       }
 
-      const slides = cropData.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
+      const slides = slideSource.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
       const currentBatchSize = Math.max(1, Math.min(batchSize, 8));
       const currentBatch = slides.slice(batchOffset, batchOffset + currentBatchSize);
       const previousResult = batchOffset > 0 ? await loadLatest("slide-descriptions") as any : null;
