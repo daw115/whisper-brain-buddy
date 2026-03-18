@@ -245,7 +245,6 @@ serve(async (req) => {
 
     // ========== STEP 3: CROP-SPLIT (batched) ==========
     if (selectedMode === "crop-split") {
-      const { batchOffset = 0, batchSize = 30 } = await req.clone().json().catch(() => ({}));
       console.log(`Step 3: Crop-split batch offset=${batchOffset} size=${batchSize}...`);
       const framePaths = await collectFramePaths();
       const totalFrames = framePaths.length;
