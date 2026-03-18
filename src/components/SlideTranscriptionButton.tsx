@@ -21,7 +21,6 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
     setError(null);
 
     try {
-      // Run both OCR + aggregation in one call (mode: "both")
       toast.info("Krok 1/3: OCR dialogów (napisy z dołu ekranu)…");
       setPhase("captions");
 
@@ -40,8 +39,10 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
       toast.success(`Gotowe! ${captionCount} dialogów + ${slideCount} slajdów → zagregowano`);
       onComplete?.(data.results);
     } catch (err: any) {
+      // Even on error, data may have been saved to DB — always refetch
+      onComplete?.(null);
       setError(err.message || "Nieznany błąd");
-      toast.error("Błąd: " + (err.message || "nieznany"));
+      toast.error("Błąd: " + (err.message || "nieznany") + " — dane mogły zostać zapisane, odświeżam…");
       setPhase("idle");
     }
   }
