@@ -17,6 +17,7 @@ const navItems = [
   { icon: Search, label: "Search", path: "/search" },
   { icon: MessageSquare, label: "Ask AI", path: "/chat" },
   { icon: ListChecks, label: "Action Items", path: "/actions" },
+  { icon: BookOpen, label: "Knowledge Base", path: "/knowledge" },
   { icon: Upload, label: "Batch Upload", path: "/upload" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];

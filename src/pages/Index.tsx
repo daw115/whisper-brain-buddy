@@ -124,6 +124,7 @@ export default function Index() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="actions" element={<ActionsPage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="upload" element={<UploadPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Routes>
