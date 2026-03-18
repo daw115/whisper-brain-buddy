@@ -315,6 +315,31 @@ export default function MeetingDetail() {
               onSuccess={() => refetchAnalyses()}
             />
           </div>
+
+          {/* Build Knowledge */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Baza wiedzy</h2>
+            <button
+              onClick={() => {
+                buildKnowledge.mutate(meeting.id, {
+                  onSuccess: (data) => {
+                    toast.success("Dodano do bazy wiedzy");
+                  },
+                  onError: (err) => {
+                    toast.error("Błąd: " + (err instanceof Error ? err.message : "nieznany"));
+                  },
+                });
+              }}
+              disabled={buildKnowledge.isPending}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-border bg-card hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              {buildKnowledge.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+              {buildKnowledge.isPending ? "Analizuję..." : "Dodaj do bazy wiedzy"}
+            </button>
+            <p className="text-[10px] text-muted-foreground/60 mt-1.5">
+              AI wyciągnie tematy, wzorce zadań i kontekst projektowy.
+            </p>
+          </div>
         </div>
 
         {/* Center: Transcript */}
