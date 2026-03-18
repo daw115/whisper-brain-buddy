@@ -24,6 +24,7 @@ export default function MeetingDetail() {
   const [showPlayer, setShowPlayer] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [framesVersion, setFramesVersion] = useState(0);
+  const [segmentsVersion, setSegmentsVersion] = useState(0);
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
 
