@@ -251,9 +251,9 @@ export default function SegmentToolbox({
 
         const mp3Stem = seg.name.replace(/\.[^.]+$/, "");
 
-        if (mp3SizeMB > maxSegmentMB) {
+        if (mp3SizeMB > maxMp3MB) {
           // Auto-split large MP3 into sub-segments
-          toast.loading(`Segment ${i + 1} = ${mp3SizeMB.toFixed(0)} MB → dzielenie na ≤${maxSegmentMB} MB…`, { id: "extract-mp3" });
+          toast.loading(`Segment ${i + 1} = ${mp3SizeMB.toFixed(0)} MB → dzielenie na ≤${maxMp3MB} MB…`, { id: "extract-mp3" });
           await ffmpeg.writeFile("autosplit_input.mp3", mp3Data);
 
           // Estimate duration
