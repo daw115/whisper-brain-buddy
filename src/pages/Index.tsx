@@ -9,6 +9,7 @@ import ActionsPage from "@/pages/ActionsPage";
 import SearchPage from "@/pages/SearchPage";
 import SettingsPage from "@/pages/SettingsPage";
 import UploadPage from "@/pages/UploadPage";
+import KnowledgePage from "@/pages/KnowledgePage";
 import { useRecorder } from "@/hooks/use-recorder";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useCreateMeeting } from "@/hooks/use-meetings";
