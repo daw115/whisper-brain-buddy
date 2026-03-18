@@ -166,7 +166,15 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
       toast.loading(`Transkrypcja segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
       const { fetchFile } = await import("@ffmpeg/util");
-      const ffmpeg = await getFFmpeg();
+      
+      // Create a fresh FFmpeg instance to avoid FS conflicts
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const ffmpeg = new FFmpeg();
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+      await ffmpeg.load({
+        coreURL: `${baseURL}/ffmpeg-core.js`,
+        wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+      });
 
       const videoData = await fetchFile(seg.signedUrl);
       await ffmpeg.writeFile("tr_input.webm", videoData);
@@ -176,6 +184,7 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
       const pcmData = await ffmpeg.readFile("tr_output.pcm") as Uint8Array;
       await ffmpeg.deleteFile("tr_input.webm");
       await ffmpeg.deleteFile("tr_output.pcm");
+      ffmpeg.terminate();
 
       const audioData = new Float32Array(pcmData.buffer);
 
