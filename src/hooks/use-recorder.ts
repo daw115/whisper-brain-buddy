@@ -185,13 +185,14 @@ export function useRecorder(): RecordingState {
       // Normal stop (user pressed stop)
       const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
       const segIdx = segmentIndexRef.current;
+      const hadPriorSegments = segIdx > 0;
       chunksRef.current = [];
       cleanup();
 
       if (blob.size === 0) return;
 
       const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
-      const filename = segIdx > 0
+      const filename = hadPriorSegments
         ? `${baseFilenameRef.current}_part${segIdx + 1}.webm`
         : `${baseFilenameRef.current}.webm`;
 
