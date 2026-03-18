@@ -345,7 +345,7 @@ export default function MeetingDetail() {
             )}
           </div>
           {meeting.transcript_lines && meeting.transcript_lines.length > 0 ? (
-            <TranscriptView lines={meeting.transcript_lines} />
+            <TranscriptView lines={meeting.transcript_lines} meetingTitle={meeting.title} />
           ) : (
             <p className="text-sm text-muted-foreground italic">No transcript available.</p>
           )}
