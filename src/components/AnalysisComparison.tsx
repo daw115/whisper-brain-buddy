@@ -243,11 +243,11 @@ function AnalysisView({ data }: { data: any }) {
   if (!data) return <p className="text-[10px] text-muted-foreground italic">Brak danych</p>;
 
   return (
-    <div className="space-y-2 text-[10px]">
+    <div className="space-y-3 text-[10px]">
       {data.summary && (
         <div>
           <span className="font-medium text-foreground">Podsumowanie:</span>
-          <p className="text-muted-foreground mt-0.5">{data.summary}</p>
+          <p className="text-muted-foreground mt-0.5 leading-relaxed">{data.summary}</p>
         </div>
       )}
       {data.sentiment && (
@@ -260,12 +260,36 @@ function AnalysisView({ data }: { data: any }) {
           ))}
         </div>
       )}
+
+      {/* Integrated transcript — the key new feature */}
+      {data.integrated_transcript && (
+        <div>
+          <span className="font-medium text-foreground">📋 Zintegrowany zapis (dialog + slajdy):</span>
+          <div className="mt-1 bg-muted/30 border border-border rounded-md p-2 max-h-64 overflow-y-auto">
+            <pre className="text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap font-mono-data">
+              {data.integrated_transcript}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {data.key_quotes?.length > 0 && (
+        <div>
+          <span className="font-medium text-foreground">Kluczowe cytaty:</span>
+          <ul className="mt-0.5 space-y-0.5">
+            {data.key_quotes.map((q: string, i: number) => (
+              <li key={i} className="text-muted-foreground italic">"{q}"</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {data.action_items?.length > 0 && (
         <div>
           <span className="font-medium text-foreground">Zadania ({data.action_items.length}):</span>
           <ul className="mt-0.5 space-y-0.5">
             {data.action_items.map((ai: any, i: number) => (
-              <li key={i} className="text-muted-foreground">• {ai.owner}: {ai.task}</li>
+              <li key={i} className="text-muted-foreground">• <strong>{ai.owner}</strong>: {ai.task}{ai.deadline ? ` (do ${ai.deadline})` : ""}</li>
             ))}
           </ul>
         </div>
@@ -273,21 +297,50 @@ function AnalysisView({ data }: { data: any }) {
       {data.decisions?.length > 0 && (
         <div>
           <span className="font-medium text-foreground">Decyzje ({data.decisions.length}):</span>
-          <ul className="mt-0.5 space-y-0.5">
+          <ul className="mt-0.5 space-y-1">
             {data.decisions.map((d: any, i: number) => (
-              <li key={i} className="text-muted-foreground">• {d.decision}</li>
+              <li key={i} className="text-muted-foreground">
+                • {d.decision}
+                {d.rationale && <span className="block ml-3 text-muted-foreground/70 italic">↳ {d.rationale}</span>}
+                {d.timestamp && <span className="text-[9px] text-muted-foreground/50 ml-1">@ {d.timestamp}</span>}
+              </li>
             ))}
           </ul>
         </div>
       )}
+
+      {/* Enhanced slide insights */}
       {data.slide_insights?.length > 0 && (
         <div>
-          <span className="font-medium text-foreground">Slajdy ({data.slide_insights.length}):</span>
-          <ul className="mt-0.5 space-y-0.5">
+          <span className="font-medium text-foreground">📊 Analiza slajdów ({data.slide_insights.length}):</span>
+          <div className="mt-1 space-y-2">
             {data.slide_insights.map((s: any, i: number) => (
-              <li key={i} className="text-muted-foreground">• {s.slide_content || s.slide_description}</li>
+              <div key={i} className="border border-border rounded-md p-2 space-y-1 bg-muted/10">
+                <div className="flex items-center gap-1.5">
+                  {s.slide_timestamp && (
+                    <span className="text-[9px] font-mono-data text-primary bg-primary/10 px-1 py-0.5 rounded">@ {s.slide_timestamp}</span>
+                  )}
+                  {s.slide_title && <span className="font-medium text-foreground">{s.slide_title}</span>}
+                </div>
+                <p className="text-muted-foreground">{s.slide_content || s.slide_description}</p>
+                {s.discussion_context && (
+                  <p className="text-muted-foreground/80 italic border-l-2 border-primary/30 pl-2">
+                    💬 {s.discussion_context}
+                  </p>
+                )}
+                {s.extra_context && (
+                  <p className="text-muted-foreground/70 border-l-2 border-accent/30 pl-2">
+                    ➕ {s.extra_context}
+                  </p>
+                )}
+                {s.discrepancies && (
+                  <p className="text-destructive/80 border-l-2 border-destructive/30 pl-2">
+                    ⚠️ {s.discrepancies}
+                  </p>
+                )}
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>
