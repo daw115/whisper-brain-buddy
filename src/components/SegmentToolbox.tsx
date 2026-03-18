@@ -848,7 +848,7 @@ export default function SegmentToolbox({
         {(phase === "extracting-mp3" || phase === "batch-frames" || phase === "splitting-video") && batchProgress.total > 0 && (
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>{phase === "extracting-mp3" ? "Wyodrębnianie MP3" : "Generowanie klatek"} {batchProgress.current}/{batchProgress.total}</span>
+              <span>{phase === "extracting-mp3" ? "Wyodrębnianie MP3" : phase === "splitting-video" ? "Dzielenie wideo" : "Generowanie klatek"} {batchProgress.current}/{batchProgress.total}</span>
               <span className="font-mono-data">{batchProgress.percent}%</span>
             </div>
             <Progress value={batchProgress.percent} className="h-1.5" />
