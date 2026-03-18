@@ -161,9 +161,11 @@ Powiąż treść slajdów z rozmową.`
 DANE WEJŚCIOWE:
 ${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
 ${frames.length > 0 ? `- ${frames.length} zrzutów ekranu slajdów prezentacji (wgrane jako obrazy)` : ""}
-${hasTranscript ? `- Transkrypt: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
+${hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
+${slideTranscript ? "- Transkrypcja wizualna slajdów (OCR) — odczytana treść prezentacji z timestampami" : ""}
 
 ${transcriptSection}
+${slideTranscriptSection}
 ${frameSection}
 
 ZADANIA:
