@@ -26,10 +26,12 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [mp3Size, setMp3Size] = useState<string | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
   const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
+  const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
 
   useEffect(() => {
     loadFrames();
     loadSlideTranscript();
+    loadIntegratedTranscript();
   }, [meeting.id, meeting.recording_filename, framesVersion]);
 
   async function loadSlideTranscript() {
@@ -46,6 +48,29 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
         const json = data.analysis_json as any;
         if (json.slide_transcript) {
           setSlideTranscript(json.slide_transcript);
+        }
+      }
+    } catch {}
+  }
+
+  async function loadIntegratedTranscript() {
+    try {
+      // Try merged first, then gemini
+      for (const src of ["merged", "gemini"]) {
+        const { data } = await supabase
+          .from("meeting_analyses")
+          .select("analysis_json")
+          .eq("meeting_id", meeting.id)
+          .eq("source", src)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data?.analysis_json) {
+          const json = data.analysis_json as any;
+          if (json.integrated_transcript) {
+            setIntegratedTranscript(json.integrated_transcript);
+            return;
+          }
         }
       }
     } catch {}
@@ -126,58 +151,60 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
     const speakers = new Set(transcriptLines.map((l) => l.speaker));
     const hasSegmentSources = [...speakers].some((s) => s.startsWith("Seg"));
 
-    const transcriptSection = hasTranscript
-      ? `TRANSKRYPT${hasSegmentSources ? " (z wielu segmentów, oznaczony źródłem)" : " (z Web Speech API, może zawierać błędy)"}:
+    // Use integrated transcript if available (already merged audio+slides by Gemini)
+    const hasIntegrated = !!integratedTranscript;
+
+    const transcriptSection = hasIntegrated
+      ? `ZAGREGOWANA TRANSKRYPCJA (audio + slajdy, chronologicznie):
+---
+${integratedTranscript!.slice(0, 20000)}
+---
+Powyższa transkrypcja łączy dialog uczestników z treścią slajdów (oznaczonych 📊 SLAJD:).
+Została już zweryfikowana i skorygowana — traktuj ją jako główne źródło danych.`
+      : hasTranscript
+      ? `TRANSKRYPT AUDIO${hasSegmentSources ? " (z wielu segmentów, oznaczony źródłem)" : " (z Web Speech API, może zawierać błędy)"}:
 ---
 ${transcriptLines
   .sort((a, b) => a.line_order - b.line_order)
   .map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`)
   .join("\n")
   .slice(0, 15000)}
----
-${transcriptLines.length > 0 ? `\nŁącznie: ${transcriptLines.length} linii transkryptu` : ""}`
+---`
       : `TRANSKRYPT: Brak automatycznego transkryptu.
 WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
-    const slideTranscriptSection = slideTranscript
-      ? `\nTRANSKRYPCJA WIZUALNA SLAJDÓW (OCR z Gemini):
----
-${slideTranscript.slice(0, 10000)}
----
-Powyżej znajduje się odczytana treść slajdów prezentacji z timestampami. Użyj jej do:
-- Weryfikacji/korekty transkryptu audio
-- Uzupełnienia danych liczbowych ze slajdów
-- Połączenia dialogu z odpowiednimi slajdami chronologicznie`
-      : "";
-
     const frameSection = frames.length > 0
-      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji (z nagrania głównego i/lub segmentów).
+      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji.
 Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
-Powiąż treść slajdów z rozmową.`
+Powiąż treść slajdów z dialogiem w transkrypcji.`
       : "";
 
     return `Przeanalizuj spotkanie biznesowe i zwróć wynik w formacie JSON.
 
 DANE WEJŚCIOWE:
+${hasIntegrated ? "- Zagregowana transkrypcja (dialog + slajdy w jednym dokumencie chronologicznym)" : ""}
+${!hasIntegrated && hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii` : ""}
 ${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
 ${frames.length > 0 ? `- ${frames.length} zrzutów ekranu slajdów prezentacji (wgrane jako obrazy)` : ""}
-${hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
-${slideTranscript ? "- Transkrypcja wizualna slajdów (OCR) — odczytana treść prezentacji z timestampami" : ""}
 
 ${transcriptSection}
-${slideTranscriptSection}
 ${frameSection}
 
 ZADANIA:
-1. ${hasTranscript ? "Przeanalizuj dostarczony transkrypt" : "Odsłuchaj/przeanalizuj plik MP3 — stranskrybuj rozmowę"}
-${hasTranscript && recordingUrl ? "2. Jeśli wgrany jest też MP3 — odsłuchaj go i uzupełnij/zweryfikuj transkrypt" : ""}
-${frames.length > 0 ? `${hasTranscript && recordingUrl ? "3" : "2"}. Przeanalizuj treść slajdów — odczytaj tekst, dane, wykresy` : ""}
-${frames.length > 0 ? `${hasTranscript && recordingUrl ? "4" : "3"}. Powiąż kontekst rozmowy z odpowiednimi slajdami` : ""}
+1. Na podstawie transkrypcji${hasIntegrated ? " (która już łączy dialog z treścią slajdów)" : ""} przeanalizuj przebieg spotkania
+${frames.length > 0 ? "2. Przeanalizuj załączone obrazy slajdów — zweryfikuj dane, odczytaj wykresy/tabele, wyłap szczegóły nieujęte w transkrypcji" : ""}
+${frames.length > 0 ? "3. Dla KAŻDEGO slajdu opisz: co zawiera, co mówiono w kontekście, jakie decyzje/wnioski wynikły" : ""}
 - Wyciągnij decyzje, zadania i podsumowanie
+
+SZCZEGÓLNY NACISK NA:
+- **Analiza slajdów**: Każdy slajd = osobny insight z pełną treścią + kontekstem dialogu
+- **Dane liczbowe**: Wyciągnij WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
+- **Rozbieżności**: Co mówiono innego niż jest na slajdach
+- **Kontekst ukryty**: Informacje z dialogu których NIE MA na slajdach (decyzje ustne, komentarze)
 
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
-  "summary": "Zwięzłe podsumowanie spotkania w 2-4 zdaniach po polsku",
+  "summary": "Zwięzłe podsumowanie spotkania w 3-5 zdaniach po polsku, z kluczowymi danymi liczbowymi",
   "sentiment": "pozytywny | neutralny | negatywny | mieszany",
   "participants": ["Imię Nazwisko uczestnika 1", "Imię Nazwisko uczestnika 2"],
   "key_quotes": ["Najważniejszy cytat — Autor"],
@@ -198,21 +225,23 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
   ]${frames.length > 0 ? `,
   "slide_insights": [
     {
-      "slide_description": "Co jest na slajdzie",
-      "context": "Jak slajd odnosi się do dyskusji",
-      "key_data": "Kluczowe dane/wykresy/tabele"
+      "slide_timestamp": "MM:SS",
+      "slide_title": "Tytuł slajdu",
+      "slide_content": "Pełna treść: tytuły, punkty, dane, wykresy",
+      "discussion_context": "Co mówili uczestnicy o tym slajdzie",
+      "extra_context": "Informacje z dialogu których NIE MA na slajdzie",
+      "discrepancies": "Rozbieżności między slajdem a tym co powiedziano (jeśli są)"
     }
   ]` : ""}
 }
 
 ZASADY:
-1. Zidentyfikuj mówców po głosie/kontekście
+1. Zidentyfikuj mówców po kontekście
 2. Action items = konkretne zadania z właścicielem
 3. Decisions = wyraźnie podjęte decyzje
-4. Summary = zwięzłe, po polsku
-5. Tags = główne tematy (max 5)
-${hasSegmentSources ? "6. Transkrypty z segmentów (Seg1, Seg2…) to części tego samego spotkania — potraktuj je jako ciągłą rozmowę" : ""}
-${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiza każdego slajdu i powiązanie z rozmową` : ""}`;
+4. Summary = zwięzłe, z danymi liczbowymi, po polsku
+5. Tags = główne tematy (max 7)
+${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!" : ""}`;
   }
 
   function handleCopy() {
@@ -399,14 +428,20 @@ ${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiz
       <div className="bg-muted/30 border border-border rounded-md p-3 space-y-1">
         <p className="text-[11px] font-medium text-foreground">📊 Dostępne dane:</p>
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
-          {hasTranscript && (
+          {integratedTranscript && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              Transkrypt: {transcriptLines.length} linii
+              ✨ Zagregowana transkrypcja (audio + slajdy) — najlepsza jakość
+            </li>
+          )}
+          {!integratedTranscript && hasTranscript && (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              Transkrypt audio: {transcriptLines.length} linii
               {[...new Set(transcriptLines.map((l) => l.speaker))].some((s) => s.startsWith("Seg")) && " (z wielu segmentów)"}
             </li>
           )}
-          {!hasTranscript && (
+          {!integratedTranscript && !hasTranscript && (
             <li className="text-muted-foreground/60">✗ Brak transkryptu — wgraj MP3 do ChatGPT</li>
           )}
           {recordingUrl && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> Nagranie dostępne do konwersji MP3</li>}
