@@ -721,12 +721,31 @@ export default function SegmentToolbox({
       await loadVideoSegments();
 
     } catch (err: any) {
-      console.error("Split video error:", err);
-      toast.error("Błąd: " + (err.message || "nieznany"), { id: "split-video" });
+      if (err?.name === "AbortError") {
+        toast.info("Podział anulowany", { id: "split-video" });
+      } else {
+        console.error("Split video error:", err);
+        toast.error("Błąd: " + (err.message || "nieznany"), { id: "split-video" });
+      }
     } finally {
+      abortRef.current = null;
       setPhase("idle");
       setBatchProgress({ current: 0, total: 0, percent: 0 });
     }
+  }
+
+  // Delete all sub-segments for a given video segment (keeps original)
+  async function handleDeleteSubSegments(seg: VideoSegment) {
+    const segStem = seg.name.replace(/\.[^.]+$/, "");
+    const subs = videoSegments.filter(s => s.name.startsWith(segStem + "_sub"));
+    if (subs.length === 0) { toast.info("Brak podsegmentów do usunięcia"); return; }
+    if (!confirm(`Usunąć ${subs.length} podsegmentów "${segStem}_sub*"? Oryginał zostanie zachowany.`)) return;
+
+    const paths = subs.map(s => s.path);
+    const { error } = await supabase.storage.from("recordings").remove(paths);
+    if (error) { toast.error("Błąd usuwania: " + error.message); return; }
+    toast.success(`Usunięto ${subs.length} podsegmentów`);
+    await loadVideoSegments();
   }
 
 
