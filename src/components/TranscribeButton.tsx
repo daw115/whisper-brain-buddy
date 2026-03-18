@@ -200,7 +200,7 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
 
       const base64 = uint8ToBase64(mp3Data);
       const { data, error } = await supabase.functions.invoke("transcribe-audio", {
-        body: { audioBase64: base64, mimeType: "audio/mpeg", language: "pl" },
+        body: { audioBase64: base64, mimeType: "audio/mpeg", language },
       });
 
       if (error) throw new Error(error.message || "Błąd transkrypcji");
