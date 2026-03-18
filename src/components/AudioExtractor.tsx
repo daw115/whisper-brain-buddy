@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages, Wifi, WifiOff } from "lucide-react";
+import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages, Wifi, WifiOff, Image } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
