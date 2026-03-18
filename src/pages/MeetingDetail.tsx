@@ -1,14 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain } from "lucide-react";
 import { useMeeting } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
-import AudioConverter from "@/components/AudioConverter";
+import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
+import FrameRegenerator from "@/components/FrameRegenerator";
+import AnalysisComparison from "@/components/AnalysisComparison";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -18,6 +21,20 @@ export default function MeetingDetail() {
   const [showPlayer, setShowPlayer] = useState(false);
   const [showChat, setShowChat] = useState(false);
 
+  // Load analyses from meeting_analyses table
+  const { data: analyses = [], refetch: refetchAnalyses } = useQuery({
+    queryKey: ["meeting-analyses", id],
+    queryFn: async () => {
+      const { data } = await (supabase as any)
+        .from("meeting_analyses")
+        .select("*")
+        .eq("meeting_id", id!)
+        .order("created_at", { ascending: true });
+      return (data || []) as { id: string; meeting_id: string; source: string; analysis_json: any; created_at: string }[];
+    },
+    enabled: !!id,
+  });
+
   useEffect(() => {
     if (!meeting?.recording_filename) return;
     (async () => {
@@ -26,7 +43,7 @@ export default function MeetingDetail() {
       const path = `${user.id}/${meeting.recording_filename}`;
       const { data } = await supabase.storage
         .from("recordings")
-        .createSignedUrl(path, 60 * 60); // 1 hour
+        .createSignedUrl(path, 60 * 60);
       if (data?.signedUrl) setRecordingUrl(data.signedUrl);
     })();
   }, [meeting?.recording_filename]);
@@ -89,7 +106,7 @@ export default function MeetingDetail() {
       </div>
 
       <div className="grid grid-cols-12 gap-px bg-border rounded-lg overflow-hidden">
-        {/* Left: Summary + Decisions */}
+        {/* Left: Summary + Recording + Analysis tools */}
         <div className="col-span-3 bg-card p-5">
           <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-4">Summary</h2>
           {meeting.summary ? (
@@ -126,7 +143,7 @@ export default function MeetingDetail() {
                   className="w-full rounded-md border border-border bg-black"
                 />
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {recordingUrl && (
                     <>
                       <button
@@ -158,7 +175,6 @@ export default function MeetingDetail() {
                       >
                         <Download className="w-3.5 h-3.5" /> Download
                       </a>
-                      <AudioConverter recordingUrl={recordingUrl} filename={meeting.recording_filename!} />
                     </>
                   )}
                 </div>
@@ -169,18 +185,40 @@ export default function MeetingDetail() {
                   {(meeting.recording_size_bytes / (1024 * 1024)).toFixed(1)} MB
                 </p>
               )}
+
+              {/* Frame regeneration */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <FrameRegenerator
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                  />
+                </div>
+              )}
             </>
           )}
 
+          {/* Gemini Analysis */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Analiza Gemini</h2>
+            <GeminiAnalysisButton
+              meetingId={meeting.id}
+              hasFrames={!!meeting.recording_filename}
+              onComplete={() => refetchAnalyses()}
+            />
+          </div>
 
-          {/* Analysis Prompt Generator */}
+          {/* ChatGPT Analysis Kit */}
           <div className="mt-6 pt-4 border-t border-border">
             <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} />
           </div>
 
-          {/* Analysis JSON Importer */}
+          {/* ChatGPT JSON Importer */}
           <div className="mt-6 pt-4 border-t border-border">
-            <AnalysisJsonImporter meetingId={meeting.id} />
+            <AnalysisJsonImporter
+              meetingId={meeting.id}
+              onSuccess={() => refetchAnalyses()}
+            />
           </div>
         </div>
 
@@ -194,7 +232,7 @@ export default function MeetingDetail() {
           )}
         </div>
 
-        {/* Right: Action Items + Participants */}
+        {/* Right: Action Items + Participants + Analysis Comparison */}
         <div className="col-span-4 bg-card p-5">
           <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-4">Action Items</h2>
           {meeting.action_items && meeting.action_items.length > 0 ? (
@@ -217,6 +255,13 @@ export default function MeetingDetail() {
                 ))}
               </div>
             </>
+          )}
+
+          {/* Analysis Comparison */}
+          {analyses.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-border">
+              <AnalysisComparison meetingId={meeting.id} analyses={analyses} />
+            </div>
           )}
         </div>
       </div>

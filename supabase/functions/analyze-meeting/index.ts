@@ -24,12 +24,9 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // User-scoped client for RLS
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-
-    // Service role client for storage access
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
     // 1. Fetch meeting + transcript
@@ -41,8 +38,7 @@ serve(async (req) => {
 
     if (meetErr || !meeting) {
       return new Response(JSON.stringify({ error: "Meeting not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -72,70 +68,50 @@ serve(async (req) => {
             const secs = num * 30;
             const mins = Math.floor(secs / 60);
             const s = secs % 60;
-            frames.push({
-              base64,
-              timestamp: `${mins}:${String(s).padStart(2, "0")}`,
-            });
+            frames.push({ base64, timestamp: `${mins}:${String(s).padStart(2, "0")}` });
           }
         }
       }
     }
 
-    // 3. Build transcript text
+    // 3. Build transcript
     const transcriptLines = meeting.transcript_lines || [];
     const sorted = [...transcriptLines].sort((a: any, b: any) => a.line_order - b.line_order);
     const transcriptText = sorted.length > 0
       ? sorted.map((l: any) => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
-      : "(Brak transkryptu tekstowego — przeanalizuj treść slajdów i kontekst wizualny)";
+      : "(Brak transkryptu — przeanalizuj treść slajdów i kontekst wizualny)";
 
-    // 4. Build multimodal message content
+    // 4. Build multimodal content
     const contentParts: any[] = [];
-
-    // System instructions as text
     contentParts.push({
       type: "text",
       text: `Jesteś asystentem AI Cerebro analizującym spotkania biznesowe.
 
 Masz do dyspozycji:
 - Transkrypt rozmowy (jeśli dostępny)
-- ${frames.length} klatek/slajdów z prezentacji pokazywanej podczas spotkania
-
-ZADANIE:
-1. Przeanalizuj treść każdego slajdu — odczytaj tekst, dane, wykresy, tabele
-2. Przeanalizuj transkrypt rozmowy
-3. Powiąż kontekst rozmowy z odpowiednimi slajdami
-4. Wyciągnij kluczowe informacje
+- ${frames.length} klatek/slajdów z prezentacji
 
 TRANSKRYPT:
 ---
 ${transcriptText.slice(0, 15000)}
 ---
 
-Poniżej znajdują się klatki slajdów z prezentacji (z oznaczeniem czasowym):`,
+Poniżej klatki slajdów z prezentacji:`,
     });
 
-    // Add frame images
     for (const frame of frames) {
-      contentParts.push({
-        type: "text",
-        text: `\n--- Slajd @ ${frame.timestamp} ---`,
-      });
+      contentParts.push({ type: "text", text: `\n--- Slajd @ ${frame.timestamp} ---` });
       contentParts.push({
         type: "image_url",
-        image_url: {
-          url: `data:image/jpeg;base64,${frame.base64}`,
-        },
+        image_url: { url: `data:image/jpeg;base64,${frame.base64}` },
       });
     }
 
     if (frames.length === 0) {
-      contentParts.push({
-        type: "text",
-        text: "\n(Brak klatek slajdów — analiza oparta wyłącznie na transkrypcie)",
-      });
+      contentParts.push({ type: "text", text: "\n(Brak klatek — analiza oparta na transkrypcie)" });
     }
 
-    // 5. Call Gemini with tool calling for structured output
+    // 5. Call Gemini with tool calling
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -144,112 +120,83 @@ Poniżej znajdują się klatki slajdów z prezentacji (z oznaczeniem czasowym):`
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-pro",
-        messages: [
-          {
-            role: "user",
-            content: contentParts,
-          },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "save_meeting_analysis",
-              description: "Save the structured analysis of a meeting including summary, action items, decisions, and slide insights.",
-              parameters: {
-                type: "object",
-                properties: {
-                  summary: {
-                    type: "string",
-                    description: "Zwięzłe podsumowanie spotkania w 2-4 zdaniach po polsku, odnoszące się do dyskusji i prezentowanych materiałów",
-                  },
-                  sentiment: {
-                    type: "string",
-                    enum: ["pozytywny", "neutralny", "negatywny", "mieszany"],
-                    description: "Ogólny ton spotkania",
-                  },
-                  participants: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Lista uczestników zidentyfikowanych z transkryptu lub slajdów",
-                  },
-                  tags: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Główne tematy spotkania (max 5 tagów)",
-                  },
-                  action_items: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        task: { type: "string", description: "Opis zadania" },
-                        owner: { type: "string", description: "Osoba odpowiedzialna" },
-                        deadline: { type: "string", description: "Termin YYYY-MM-DD lub null" },
-                      },
-                      required: ["task", "owner"],
-                      additionalProperties: false,
+        messages: [{ role: "user", content: contentParts }],
+        tools: [{
+          type: "function",
+          function: {
+            name: "save_meeting_analysis",
+            description: "Save structured meeting analysis",
+            parameters: {
+              type: "object",
+              properties: {
+                summary: { type: "string", description: "Podsumowanie 2-4 zdania po polsku" },
+                sentiment: { type: "string", enum: ["pozytywny", "neutralny", "negatywny", "mieszany"] },
+                participants: { type: "array", items: { type: "string" } },
+                tags: { type: "array", items: { type: "string" }, description: "Max 5 tagów" },
+                key_quotes: { type: "array", items: { type: "string" } },
+                action_items: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      task: { type: "string" },
+                      owner: { type: "string" },
+                      deadline: { type: "string" },
                     },
-                    description: "Konkretne zadania do wykonania",
-                  },
-                  decisions: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        decision: { type: "string", description: "Podjęta decyzja" },
-                        rationale: { type: "string", description: "Uzasadnienie" },
-                        timestamp: { type: "string", description: "Czas MM:SS" },
-                      },
-                      required: ["decision"],
-                      additionalProperties: false,
-                    },
-                    description: "Podjęte decyzje",
-                  },
-                  slide_insights: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        slide_timestamp: { type: "string", description: "Czas slajdu" },
-                        slide_content: { type: "string", description: "Co jest na slajdzie — tekst, dane, wykresy" },
-                        discussion_context: { type: "string", description: "Jak slajd odnosi się do rozmowy" },
-                      },
-                      required: ["slide_content"],
-                      additionalProperties: false,
-                    },
-                    description: "Analiza poszczególnych slajdów",
-                  },
-                  key_quotes: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Najważniejsze cytaty ze spotkania",
+                    required: ["task", "owner"],
+                    additionalProperties: false,
                   },
                 },
-                required: ["summary", "sentiment", "tags", "action_items", "decisions"],
-                additionalProperties: false,
+                decisions: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      decision: { type: "string" },
+                      rationale: { type: "string" },
+                      timestamp: { type: "string" },
+                    },
+                    required: ["decision"],
+                    additionalProperties: false,
+                  },
+                },
+                slide_insights: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      slide_timestamp: { type: "string" },
+                      slide_content: { type: "string" },
+                      discussion_context: { type: "string" },
+                    },
+                    required: ["slide_content"],
+                    additionalProperties: false,
+                  },
+                },
               },
+              required: ["summary", "sentiment", "tags", "action_items", "decisions"],
+              additionalProperties: false,
             },
           },
-        ],
+        }],
         tool_choice: { type: "function", function: { name: "save_meeting_analysis" } },
       }),
     });
 
     if (!response.ok) {
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit — spróbuj ponownie za chwilę." }), {
+        return new Response(JSON.stringify({ error: "Rate limit — spróbuj za chwilę." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Brak kredytów AI. Doładuj w Settings → Workspace → Usage." }), {
+        return new Response(JSON.stringify({ error: "Brak kredytów AI." }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       const t = await response.text();
       console.error("AI gateway error:", response.status, t);
-      return new Response(JSON.stringify({ error: `AI gateway error: ${response.status}` }), {
+      return new Response(JSON.stringify({ error: `AI error: ${response.status}` }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -264,52 +211,12 @@ Poniżej znajdują się klatki slajdów z prezentacji (z oznaczeniem czasowym):`
 
     const analysis = JSON.parse(toolCall.function.arguments);
 
-    // 6. Save results to database
-    // Update meeting summary + tags
-    const summaryText = analysis.sentiment
-      ? `[${analysis.sentiment.toUpperCase()}] ${analysis.summary}`
-      : analysis.summary;
-
-    await supabase
-      .from("meetings")
-      .update({
-        summary: summaryText,
-        tags: analysis.tags || [],
-        status: "analyzed",
-      })
-      .eq("id", meetingId);
-
-    // Insert participants
-    if (analysis.participants?.length) {
-      const newParticipants = analysis.participants.map((name: string) => ({
-        meeting_id: meetingId,
-        name,
-      }));
-      await supabase.from("meeting_participants").insert(newParticipants);
-    }
-
-    // Insert action items
-    if (analysis.action_items?.length) {
-      const items = analysis.action_items.map((ai: any) => ({
-        meeting_id: meetingId,
-        user_id: meeting.user_id,
-        task: ai.task,
-        owner: ai.owner || "Nieprzypisane",
-        deadline: ai.deadline || null,
-      }));
-      await supabase.from("action_items").insert(items);
-    }
-
-    // Insert decisions
-    if (analysis.decisions?.length) {
-      const decs = analysis.decisions.map((d: any) => ({
-        meeting_id: meetingId,
-        decision: d.decision,
-        rationale: d.rationale || null,
-        timestamp: d.timestamp || null,
-      }));
-      await supabase.from("decisions").insert(decs);
-    }
+    // 6. Save to meeting_analyses table (source: gemini)
+    await supabase.from("meeting_analyses").insert({
+      meeting_id: meetingId,
+      source: "gemini",
+      analysis_json: analysis,
+    });
 
     return new Response(JSON.stringify({ success: true, analysis }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

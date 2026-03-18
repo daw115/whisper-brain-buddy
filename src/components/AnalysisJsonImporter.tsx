@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 interface Props {
   meetingId: string;
-  onSuccess?: () => void;
+  onSuccess?: (analysis: any) => void;
 }
 
 interface AnalysisJson {
@@ -49,69 +49,22 @@ export default function AnalysisJsonImporter({ meetingId, onSuccess }: Props) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Nie zalogowano");
 
-      // Update meeting: summary, tags, sentiment
-      const updates: Record<string, unknown> = {};
-      if (parsed.summary) updates.summary = parsed.summary;
-      if (parsed.tags?.length) updates.tags = parsed.tags;
-      if (parsed.sentiment) {
-        updates.summary = `[${parsed.sentiment.toUpperCase()}] ${parsed.summary || ""}`;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        const { error: meetErr } = await supabase
-          .from("meetings")
-          .update(updates)
-          .eq("id", meetingId);
-        if (meetErr) console.error("Meeting update error:", meetErr);
-      }
-
-      // Insert participants
-      if (parsed.participants?.length) {
-        const existing = await supabase
-          .from("meeting_participants")
-          .select("name")
-          .eq("meeting_id", meetingId);
-        const existingNames = new Set((existing.data || []).map((p) => p.name));
-        const newParticipants = parsed.participants
-          .filter((name) => !existingNames.has(name))
-          .map((name) => ({ meeting_id: meetingId, name }));
-        if (newParticipants.length > 0) {
-          await supabase.from("meeting_participants").insert(newParticipants);
-        }
-      }
-
-      // Insert action items
-      if (parsed.action_items?.length) {
-        const items = parsed.action_items.map((ai) => ({
-          meeting_id: meetingId,
-          user_id: user.id,
-          task: ai.task,
-          owner: ai.owner || "Nieprzypisane",
-          deadline: ai.deadline || null,
-        }));
-        await supabase.from("action_items").insert(items);
-      }
-
-      // Insert decisions
-      if (parsed.decisions?.length) {
-        const decs = parsed.decisions.map((d) => ({
-          meeting_id: meetingId,
-          decision: d.decision,
-          rationale: d.rationale || null,
-          timestamp: d.timestamp || null,
-        }));
-        await supabase.from("decisions").insert(decs);
-      }
+      // Save to meeting_analyses as chatgpt source
+      await (supabase as any).from("meeting_analyses").insert({
+        meeting_id: meetingId,
+        source: "chatgpt",
+        analysis_json: parsed,
+      });
 
       // Invalidate caches
       qc.invalidateQueries({ queryKey: ["meeting", meetingId] });
       qc.invalidateQueries({ queryKey: ["meetings"] });
-      qc.invalidateQueries({ queryKey: ["all-action-items"] });
+      qc.invalidateQueries({ queryKey: ["meeting-analyses", meetingId] });
 
       setDone(true);
       setJson("");
-      toast.success("Analiza zaimportowana pomyślnie");
-      onSuccess?.();
+      toast.success("Analiza ChatGPT zapisana");
+      onSuccess?.(parsed);
     } catch (err: any) {
       setError(err.message || "Błąd importu");
     } finally {
@@ -123,7 +76,7 @@ export default function AnalysisJsonImporter({ meetingId, onSuccess }: Props) {
     return (
       <div className="flex items-center gap-2 text-sm text-primary py-2">
         <Check className="w-4 h-4" />
-        Analiza zaimportowana
+        Analiza ChatGPT zapisana
       </div>
     );
   }
@@ -131,7 +84,7 @@ export default function AnalysisJsonImporter({ meetingId, onSuccess }: Props) {
   return (
     <div className="space-y-3">
       <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">
-        Importuj wynik analizy
+        Importuj wynik z ChatGPT
       </h2>
 
       <textarea
@@ -158,7 +111,7 @@ export default function AnalysisJsonImporter({ meetingId, onSuccess }: Props) {
         ) : (
           <ClipboardPaste className="w-3.5 h-3.5" />
         )}
-        {importing ? "Importuję…" : "Importuj analizę"}
+        {importing ? "Zapisuję…" : "Zapisz analizę ChatGPT"}
       </button>
     </div>
   );
