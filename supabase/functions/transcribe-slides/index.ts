@@ -170,6 +170,32 @@ serve(async (req) => {
       return btoa(binary);
     }
 
+    type CaptionEntry = { timestamp: string; speaker: string; text: string };
+
+    function dedupeCaptionEntries(entries: CaptionEntry[]): CaptionEntry[] {
+      const deduped: CaptionEntry[] = [];
+      for (const entry of entries) {
+        const normalized: CaptionEntry = {
+          timestamp: String(entry.timestamp || "").trim(),
+          speaker: String(entry.speaker || "Unknown").trim(),
+          text: String(entry.text || "").trim(),
+        };
+        if (!normalized.text) continue;
+
+        const previous = deduped[deduped.length - 1];
+        if (
+          previous &&
+          previous.speaker === normalized.speaker &&
+          previous.text === normalized.text
+        ) {
+          continue;
+        }
+
+        deduped.push(normalized);
+      }
+      return deduped;
+    }
+
     const results: Record<string, any> = {};
 
     // ========== STEP 3: DEDUPLICATE FRAMES (batched, no image decoding) ==========
