@@ -14,7 +14,7 @@ interface Props {
   onDeleted?: () => void;
 }
 
-export default function UniqueSlides({ meetingId, analyses }: Props) {
+export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) {
   const [thumbnails, setThumbnails] = useState<{ url: string; timestamp: string }[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
