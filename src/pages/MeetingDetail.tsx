@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
+import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 
 export default function MeetingDetail() {
   const { id } = useParams();
