@@ -16,6 +16,7 @@ import RecordingPanel from "@/components/RecordingPanel";
 import SegmentToolbox from "@/components/SegmentToolbox";
 import AIInputPreview from "@/components/AIInputPreview";
 import SlideInsightsPanel from "@/components/SlideInsightsPanel";
+import SlideTranscriptionButton from "@/components/SlideTranscriptionButton";
 import { toast } from "sonner";
 import { useBuildKnowledge } from "@/hooks/use-knowledge";
 
@@ -293,6 +294,29 @@ export default function MeetingDetail() {
             </>
           )}
 
+          {/* Slide Transcription (OCR) */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Transkrypcja slajdów</h2>
+            <SlideTranscriptionButton
+              meetingId={meeting.id}
+              hasFrames={!!meeting.recording_filename}
+              onComplete={() => refetchAnalyses()}
+            />
+            {/* Show existing slide transcript */}
+            {analyses.filter(a => a.source === "slide-transcript").length > 0 && (() => {
+              const stAnalysis = analyses.filter(a => a.source === "slide-transcript")[0];
+              const json = stAnalysis.analysis_json as any;
+              return (
+                <div className="mt-2 p-2 bg-muted/30 rounded border border-border max-h-40 overflow-y-auto">
+                  <p className="text-[10px] text-muted-foreground mb-1">📄 Transkrypcja wizualna ({json?.total_slides || "?"} slajdów)</p>
+                  <pre className="text-[9px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed">
+                    {json?.slide_transcript?.slice(0, 2000) || "Brak danych"}
+                  </pre>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* Gemini Analysis */}
           <div className="mt-6 pt-4 border-t border-border">
             <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Analiza Gemini</h2>
@@ -303,6 +327,9 @@ export default function MeetingDetail() {
               framesVersion={framesVersion}
               onComplete={() => refetchAnalyses()}
             />
+            {analyses.filter(a => a.source === "slide-transcript").length > 0 && (
+              <p className="text-[9px] text-primary/70 mt-1">✓ Transkrypcja slajdów dostępna — Gemini połączy oba źródła</p>
+            )}
           </div>
 
           {/* ChatGPT Analysis Kit */}

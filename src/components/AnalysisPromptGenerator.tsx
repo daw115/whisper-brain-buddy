@@ -25,10 +25,31 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [mp3Url, setMp3Url] = useState<string | null>(null);
   const [mp3Size, setMp3Size] = useState<string | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
+  const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
 
   useEffect(() => {
     loadFrames();
+    loadSlideTranscript();
   }, [meeting.id, meeting.recording_filename, framesVersion]);
+
+  async function loadSlideTranscript() {
+    try {
+      const { data } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meeting.id)
+        .eq("source", "slide-transcript")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.analysis_json) {
+        const json = data.analysis_json as any;
+        if (json.slide_transcript) {
+          setSlideTranscript(json.slide_transcript);
+        }
+      }
+    } catch {}
+  }
 
   async function loadFrames() {
     setLoading(true);
@@ -118,6 +139,17 @@ ${transcriptLines.length > 0 ? `\nŁącznie: ${transcriptLines.length} linii tra
       : `TRANSKRYPT: Brak automatycznego transkryptu.
 WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
+    const slideTranscriptSection = slideTranscript
+      ? `\nTRANSKRYPCJA WIZUALNA SLAJDÓW (OCR z Gemini):
+---
+${slideTranscript.slice(0, 10000)}
+---
+Powyżej znajduje się odczytana treść slajdów prezentacji z timestampami. Użyj jej do:
+- Weryfikacji/korekty transkryptu audio
+- Uzupełnienia danych liczbowych ze slajdów
+- Połączenia dialogu z odpowiednimi slajdami chronologicznie`
+      : "";
+
     const frameSection = frames.length > 0
       ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji (z nagrania głównego i/lub segmentów).
 Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
@@ -129,9 +161,11 @@ Powiąż treść slajdów z rozmową.`
 DANE WEJŚCIOWE:
 ${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
 ${frames.length > 0 ? `- ${frames.length} zrzutów ekranu slajdów prezentacji (wgrane jako obrazy)` : ""}
-${hasTranscript ? `- Transkrypt: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
+${hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
+${slideTranscript ? "- Transkrypcja wizualna slajdów (OCR) — odczytana treść prezentacji z timestampami" : ""}
 
 ${transcriptSection}
+${slideTranscriptSection}
 ${frameSection}
 
 ZADANIA:
