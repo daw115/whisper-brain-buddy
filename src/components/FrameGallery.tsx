@@ -115,6 +115,22 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
     }
   }
 
+  async function handleDeleteAll() {
+    if (!frames.length) return;
+    if (!confirm(`Usunąć wszystkie ${frames.length} klatek?`)) return;
+    try {
+      const paths = frames.map((f) => f.path);
+      const { error } = await supabase.storage.from("recordings").remove(paths);
+      if (error) throw error;
+      setFrames([]);
+      setLightboxIdx(null);
+      setExpanded(false);
+      toast.success(`Usunięto ${paths.length} klatek`);
+    } catch (err: any) {
+      toast.error("Błąd: " + (err.message || "nieznany"));
+    }
+  }
+
   function formatTimestamp(secs: number) {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
