@@ -238,6 +238,18 @@ export default function MeetingDetail() {
                 </div>
               )}
 
+              {/* Audio extraction & splitting */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <AudioExtractor
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                    recordingSizeBytes={meeting.recording_size_bytes}
+                    meetingId={meeting.id}
+                  />
+                </div>
+              )}
+
               {/* Frame regeneration */}
               {recordingUrl && (
                 <div className="mt-3 pt-3 border-t border-border">
