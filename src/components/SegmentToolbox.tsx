@@ -574,7 +574,136 @@ export default function SegmentToolbox({
     }
   }
 
-  // Helpers
+  // Split a single video segment into ~100MB parts using FFmpeg
+  const [splitChunkMB, setSplitChunkMB] = useState(100);
+
+  async function handleSplitVideoSegment(seg: VideoSegment) {
+    if (!seg.signedUrl) { toast.error("Brak URL segmentu"); return; }
+    setPhase("splitting-video");
+    setBatchProgress({ current: 0, total: 0, percent: 0 });
+
+    try {
+      toast.loading("Pobieranie segmentu wideo…", { id: "split-video" });
+      const res = await fetch(seg.signedUrl);
+      const blob = await res.blob();
+      const inputBytes = new Uint8Array(await blob.arrayBuffer());
+
+      toast.loading("Ładowanie FFmpeg…", { id: "split-video" });
+      const ffmpeg = await getFFmpeg();
+
+      const ext = seg.name.match(/\.[^.]+$/)?.[0] || ".webm";
+      const inputName = `split_input${ext}`;
+      await ffmpeg.writeFile(inputName, inputBytes);
+
+      // Get duration
+      let durationSec = 0;
+      const logHandler = ({ message }: { message: string }) => {
+        const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
+        if (match) {
+          durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
+        }
+      };
+      ffmpeg.on("log", logHandler);
+      await ffmpeg.exec(["-i", inputName, "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
+      ffmpeg.off("log", logHandler);
+
+      if (durationSec <= 0) {
+        durationSec = blob.size / (2 * 1024 * 1024);
+        if (durationSec < 10) durationSec = 60;
+      }
+
+      const chunkBytes = splitChunkMB * 1024 * 1024;
+      const bytesPerSec = blob.size / durationSec;
+      const segDuration = Math.max(10, Math.floor(chunkBytes / bytesPerSec));
+      const totalParts = Math.ceil(durationSec / segDuration);
+
+      if (totalParts <= 1) {
+        toast.info("Segment nie wymaga podziału", { id: "split-video" });
+        return;
+      }
+
+      toast.loading(`Dzielenie na ~${totalParts} części…`, { id: "split-video" });
+
+      const outputPattern = `splitout_%03d${ext}`;
+      await ffmpeg.exec([
+        "-i", inputName,
+        "-c", "copy",
+        "-f", "segment",
+        "-segment_time", String(segDuration),
+        "-reset_timestamps", "1",
+        outputPattern,
+      ]);
+
+      // Read output parts
+      const parts: { name: string; data: Uint8Array }[] = [];
+      for (let i = 0; i < 999; i++) {
+        const partName = `splitout_${String(i).padStart(3, "0")}${ext}`;
+        try {
+          const data = await ffmpeg.readFile(partName) as Uint8Array;
+          if (data.length > 0) parts.push({ name: partName, data });
+        } catch { break; }
+      }
+
+      if (parts.length === 0) {
+        toast.error("FFmpeg nie wygenerował segmentów", { id: "split-video" });
+        return;
+      }
+
+      // Upload parts — replace original segment with numbered sub-parts
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Nie zalogowano");
+
+      // Derive new names: if segment is meeting_X_part2.webm → meeting_X_part2a.webm, part2b.webm, etc.
+      // Better: meeting_X_part2_sub1.webm, _sub2.webm
+      const segStem = seg.name.replace(/\.[^.]+$/, "");
+      let uploaded = 0;
+      setBatchProgress({ current: 0, total: parts.length, percent: 0 });
+
+      for (let i = 0; i < parts.length; i++) {
+        const partFilename = `${segStem}_sub${i + 1}${ext}`;
+        const path = `${user.id}/${partFilename}`;
+        const partBlob = new Blob([new Uint8Array(parts[i].data)], { type: blob.type || "video/webm" });
+
+        toast.loading(`Przesyłanie ${i + 1}/${parts.length}…`, { id: "split-video" });
+
+        const { error } = await supabase.storage.from("recordings").upload(path, partBlob, {
+          contentType: blob.type || "video/webm",
+          upsert: true,
+        });
+
+        if (error) console.error(`Upload sub ${i + 1}:`, error);
+        else uploaded++;
+
+        setBatchProgress({ current: i + 1, total: parts.length, percent: Math.round(((i + 1) / parts.length) * 100) });
+      }
+
+      // Cleanup FFmpeg temp files
+      try {
+        await ffmpeg.deleteFile(inputName);
+        for (const p of parts) await ffmpeg.deleteFile(p.name).catch(() => {});
+      } catch {}
+
+      // Optionally delete original oversized segment
+      if (uploaded === parts.length) {
+        await supabase.storage.from("recordings").remove([seg.path]);
+        toast.success(`Podzielono na ${uploaded} części i usunięto oryginał`, { id: "split-video", duration: 5000 });
+      } else {
+        toast.success(`Przesłano ${uploaded}/${parts.length} części`, { id: "split-video", duration: 5000 });
+      }
+
+      // Reload segments
+      await loadVideoSegments();
+
+    } catch (err: any) {
+      console.error("Split video error:", err);
+      toast.error("Błąd: " + (err.message || "nieznany"), { id: "split-video" });
+    } finally {
+      setPhase("idle");
+      setBatchProgress({ current: 0, total: 0, percent: 0 });
+    }
+  }
+
+
   function getSelectedVideoSegments() { return videoSegments.filter((_, i) => selectedVideo.has(i)); }
   function getSelectedAudioSegments() { return audioSegments.filter((_, i) => selectedAudio.has(i)); }
 
