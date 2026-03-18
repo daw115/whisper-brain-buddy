@@ -25,6 +25,7 @@ export default function RecordingHUD({
   time,
   liveTranscript,
   segmentCount = 0,
+  currentSizeMB = 0,
   onStop,
   onPause,
   onResume,
