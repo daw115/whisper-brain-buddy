@@ -25,7 +25,7 @@ export default function MeetingDetail() {
   const navigate = useNavigate();
   const { data: meeting, isLoading } = useMeeting(id);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
-  const [showPlayer] = useState(false);
+  
   const [showChat, setShowChat] = useState(false);
   const [framesVersion, setFramesVersion] = useState(0);
   const [segmentsVersion, setSegmentsVersion] = useState(0);
