@@ -385,7 +385,7 @@ Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych sc
 
     // ========== STEP 5: DESCRIBE SLIDES ==========
     if (selectedMode === "describe-slides") {
-      console.log("Step 5: Describe unique slides...");
+      console.log(`Step 5: Describe unique slides batch offset=${batchOffset} size=${batchSize}...`);
 
       const cropData = await loadLatest("crop-split") as any;
       if (!cropData?.unique_slides?.length) {
@@ -393,10 +393,16 @@ Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych sc
       }
 
       const slides = cropData.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
+      const currentBatchSize = Math.max(1, Math.min(batchSize, 8));
+      const currentBatch = slides.slice(batchOffset, batchOffset + currentBatchSize);
+      const previousResult = batchOffset > 0 ? await loadLatest("slide-descriptions") as any : null;
 
-      // Load slide images for AI (max 25)
+      if (currentBatch.length === 0) {
+        throw { status: 400, message: "No slides left to describe" };
+      }
+
       const imageParts: any[] = [];
-      for (const slide of slides.slice(0, 25)) {
+      for (const slide of currentBatch) {
         const { data: blob } = await supabaseAdmin.storage.from("recordings").download(slide.path);
         if (!blob) continue;
         const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -405,20 +411,24 @@ Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych sc
         imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
       }
 
+      if (imageParts.length === 0) {
+        throw { status: 400, message: "Could not load slide frames for description" };
+      }
+
       const describeParts: any[] = [
         {
           type: "text",
-          text: `Jesteś ekspertem od analizy prezentacji. Poniżej ${slides.length} unikalnych slajdów z nagrania spotkania.
+          text: `Jesteś ekspertem od analizy prezentacji. Poniżej ${currentBatch.length} unikalnych slajdów z jednego batcha nagrania spotkania.
 Każdy slajd pojawił się po raz pierwszy w podanym timestampie.
 
 ## ZADANIE
-Dla każdego slajdu:
+Dla każdego dostarczonego slajdu:
 1. Podaj **tytuł** slajdu
 2. Opisz **pełną treść**: bullet pointy, dane liczbowe, wykresy, tabele, diagramy
 3. Wyciągnij **kluczowe informacje** (liczby, nazwy, daty, wnioski)
 4. Krótko opisz **kontekst** slajdu w prezentacji (np. "agenda", "wyniki Q1", "plan działań")
 
-Kolejność: chronologicznie, zgodnie z timestampami.`,
+Kolejność: chronologicznie, zgodnie z timestampami. Zwróć tylko opisy dla dostarczonych slajdów.`,
         },
         ...imageParts,
       ];
@@ -446,7 +456,7 @@ Kolejność: chronologicznie, zgodnie z timestampami.`,
                   additionalProperties: false,
                 },
               },
-              presentation_summary: { type: "string", description: "Krótkie podsumowanie całej prezentacji" },
+              presentation_summary: { type: "string", description: "Krótkie podsumowanie batcha prezentacji" },
             },
             required: ["slides", "presentation_summary"],
             additionalProperties: false,
@@ -454,9 +464,31 @@ Kolejność: chronologicznie, zgodnie z timestampami.`,
         },
       }], { type: "function", function: { name: "save_slide_descriptions" } });
 
-      console.log(`Described ${descResult.slides?.length ?? 0} slides`);
-      await saveAnalysis("slide-descriptions", descResult);
-      results.slideDescriptions = descResult;
+      const mergedSlides = [
+        ...(previousResult?.slides ?? []),
+        ...(descResult.slides ?? []),
+      ];
+      const mergedSummary = [
+        previousResult?.presentation_summary,
+        descResult.presentation_summary,
+      ].filter(Boolean).join("\n\n");
+      const totalProcessed = Math.min(batchOffset + currentBatch.length, slides.length);
+      const hasMore = totalProcessed < slides.length;
+
+      const mergedResult = {
+        slides: mergedSlides,
+        presentation_summary: mergedSummary,
+        processed_slides: totalProcessed,
+        slides_total: slides.length,
+        has_more: hasMore,
+        next_offset: hasMore ? totalProcessed : null,
+      };
+
+      console.log(`Described total ${mergedSlides.length} slides, processed ${totalProcessed}/${slides.length}`);
+      await supabase.from("meeting_analyses").delete()
+        .eq("meeting_id", meetingId).eq("source", "slide-descriptions");
+      await saveAnalysis("slide-descriptions", mergedResult);
+      results.slideDescriptions = mergedResult;
     }
 
     // ========== AGGREGATE (captions + audio + slides) ==========

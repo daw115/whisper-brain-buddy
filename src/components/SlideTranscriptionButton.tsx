@@ -179,15 +179,44 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
     setBatchProgress(null);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
-        body: { meetingId, mode },
-      });
-      if (fnError) throw new Error(fnError.message || "Błąd wywołania");
-      if (data?.error) throw new Error(data.error);
+      const isBatchedMode = mode === "ocr-captions" || mode === "describe-slides";
+      const requestedBatchSize = mode === "ocr-captions" ? 12 : mode === "describe-slides" ? 8 : null;
+      let nextOffset = 0;
+      let latestResults: any = null;
 
-      const stepResults = data?.results ?? {};
-      setCompletedSteps(prev => ({ ...prev, [mode]: stepResults }));
-      onComplete?.(stepResults);
+      while (true) {
+        const body = isBatchedMode
+          ? { meetingId, mode, batchOffset: nextOffset, batchSize: requestedBatchSize }
+          : { meetingId, mode };
+
+        const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", { body });
+        if (fnError) throw new Error(fnError.message || "Błąd wywołania");
+        if (data?.error) throw new Error(data.error);
+
+        latestResults = data?.results ?? {};
+        setCompletedSteps((prev) => ({ ...prev, [mode]: latestResults }));
+
+        const partial = mode === "ocr-captions"
+          ? latestResults.captions
+          : mode === "describe-slides"
+            ? latestResults.slideDescriptions
+            : null;
+
+        if (mode === "ocr-captions" && partial) {
+          setBatchProgress(`OCR: ${partial.processed_frames}/${partial.frames_total} klatek`);
+        }
+        if (mode === "describe-slides" && partial) {
+          setBatchProgress(`Slajdy: ${partial.processed_slides}/${partial.slides_total}`);
+        }
+
+        if (!isBatchedMode || !partial?.has_more || partial?.next_offset == null) {
+          break;
+        }
+
+        nextOffset = partial.next_offset;
+      }
+
+      onComplete?.(latestResults ?? {});
       toast.success(`Krok ${stepConfig[mode as keyof typeof stepConfig]?.stepNum}: gotowe!`);
     } catch (err: any) {
       setError(err.message || "Nieznany błąd");
