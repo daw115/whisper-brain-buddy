@@ -13,6 +13,7 @@ export default function MeetingDetail() {
   const { data: meeting, isLoading } = useMeeting(id);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [showChat, setShowChat] = useState(false);
 
   useEffect(() => {
     if (!meeting?.recording_filename) return;
