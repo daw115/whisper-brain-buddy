@@ -122,18 +122,20 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
 
+      const inputName = `seg_input_${idx}.webm`;
+      const outputName = `seg_output_${idx}.mp3`;
       const videoData = await fetchFile(seg.signedUrl);
-      await ffmpeg.writeFile("seg_input.webm", videoData);
+      await ffmpeg.writeFile(inputName, videoData);
 
-      await ffmpeg.exec(["-i", "seg_input.webm", "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", "seg_output.mp3"]);
+      await ffmpeg.exec(["-i", inputName, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", outputName]);
 
-      const rawData = await ffmpeg.readFile("seg_output.mp3");
+      const rawData = await ffmpeg.readFile(outputName);
       const blob = new Blob([rawData as any], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
 
-      await ffmpeg.deleteFile("seg_input.webm");
-      await ffmpeg.deleteFile("seg_output.mp3");
+      try { await ffmpeg.deleteFile(inputName); } catch {}
+      try { await ffmpeg.deleteFile(outputName); } catch {}
 
       setMp3Urls((prev) => ({ ...prev, [idx]: { url, sizeMB } }));
       toast.success(`MP3 segmentu #${idx + 1}: ${sizeMB} MB`, { id: `mp3-${idx}` });
@@ -187,12 +189,23 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
       }
 
       setTranscribePhase("loading-model");
-      toast.loading(`Ładowanie Whisper…`, { id: `trans-${idx}` });
+      toast.loading(`Ładowanie Whisper (~50MB, przeglądarka może się zawiesić na chwilę)…`, { id: `trans-${idx}` });
 
       const { pipeline } = await import("@huggingface/transformers");
+
+      // Try WebGPU first (non-blocking, faster), fallback to WASM
+      let device: "webgpu" | "wasm" = "wasm";
+      try {
+        if ((navigator as any).gpu) {
+          const adapter = await (navigator as any).gpu.requestAdapter();
+          if (adapter) device = "webgpu";
+        }
+      } catch {}
+      console.log(`Whisper using device: ${device}`);
+
       const transcriber = await pipeline("automatic-speech-recognition", "onnx-community/whisper-small", {
-        dtype: "q4",
-        device: "wasm",
+        dtype: device === "webgpu" ? "fp32" : "q4",
+        device,
       });
 
       setTranscribePhase("transcribing");
