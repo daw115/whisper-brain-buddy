@@ -69,9 +69,70 @@ export default function AudioExtractor({
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [transcribeMode, setTranscribeMode] = useState<"online" | "offline">("online");
   const ffmpegRef = useRef<any>(null);
+  const [cachedFrames, setCachedFrames] = useState<{ base64: string; timestamp: string }[]>([]);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
   const mp3Filename = `${stem}.mp3`;
+
+  // Load frames for visual context (online mode)
+  useEffect(() => {
+    loadFramesForContext();
+  }, [recordingFilename, framesVersion]);
+
+  async function loadFramesForContext() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const prefixes = [`${user.id}/frames/${stem}`];
+      const { data: allDirs } = await supabase.storage.from("recordings").list(`${user.id}/frames`);
+      if (allDirs) {
+        for (const d of allDirs) {
+          if (d.name.startsWith(stem + "_part") && d.id) {
+            prefixes.push(`${user.id}/frames/${d.name}`);
+          }
+        }
+      }
+
+      const frameFiles: { path: string; timestamp: number }[] = [];
+      for (const prefix of prefixes) {
+        const { data: files } = await supabase.storage.from("recordings").list(prefix, { limit: 50, sortBy: { column: "name", order: "asc" } });
+        if (files) {
+          for (const f of files) {
+            if (!f.name.match(/\.(jpg|jpeg|png)$/i)) continue;
+            const match = f.name.match(/frame_(\d+)s?\./);
+            frameFiles.push({ path: `${prefix}/${f.name}`, timestamp: match ? parseInt(match[1]) : 0 });
+          }
+        }
+      }
+
+      if (frameFiles.length === 0) { setCachedFrames([]); return; }
+      frameFiles.sort((a, b) => a.timestamp - b.timestamp);
+      const selected = frameFiles.slice(0, 20);
+
+      const { data: signed } = await supabase.storage.from("recordings").createSignedUrls(selected.map(f => f.path), 3600);
+      if (!signed) { setCachedFrames([]); return; }
+
+      const frames: { base64: string; timestamp: string }[] = [];
+      for (let i = 0; i < signed.length; i++) {
+        if (!signed[i].signedUrl) continue;
+        try {
+          const res = await fetch(signed[i].signedUrl);
+          const blob = await res.blob();
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          const secs = selected[i].timestamp;
+          const mins = Math.floor(secs / 60);
+          const s = secs % 60;
+          frames.push({ base64: uint8ToBase64(bytes), timestamp: `${mins}:${String(s).padStart(2, "0")}` });
+        } catch { /* skip */ }
+      }
+      setCachedFrames(frames);
+      console.log(`Loaded ${frames.length} frames for visual context`);
+    } catch (err) {
+      console.error("Load frames for context error:", err);
+      setCachedFrames([]);
+    }
+  }
 
   // Check if MP3 already exists on server
   useEffect(() => {
