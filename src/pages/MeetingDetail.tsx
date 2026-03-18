@@ -175,7 +175,7 @@ export default function MeetingDetail() {
 
           {/* Analysis Prompt Generator */}
           <div className="mt-6 pt-4 border-t border-border">
-            <AnalysisPromptGenerator meeting={meeting} />
+            <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} />
           </div>
 
           {/* Analysis JSON Importer */}

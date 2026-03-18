@@ -178,8 +178,8 @@ ZASADY:
       await ffmpeg.exec(["-i", "input.webm", "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", "output.mp3"]);
 
       const rawData = await ffmpeg.readFile("output.mp3");
-      const uint8 = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData as ArrayBuffer);
-      const blob = new Blob([uint8.buffer], { type: "audio/mpeg" });
+      const bytes = rawData instanceof Uint8Array ? rawData : new TextEncoder().encode(rawData as unknown as string);
+      const blob = new Blob([bytes], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       setMp3Url(url);
       setMp3Size((blob.size / (1024 * 1024)).toFixed(1));
