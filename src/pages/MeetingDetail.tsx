@@ -14,6 +14,7 @@ import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
 import RecordingSplitter from "@/components/RecordingSplitter";
 import RecordingSegments from "@/components/RecordingSegments";
+import FrameGallery from "@/components/FrameGallery";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
@@ -252,6 +253,14 @@ export default function MeetingDetail() {
                   key={segmentsVersion}
                   recordingFilename={meeting.recording_filename}
                   onFramesGenerated={() => setFramesVersion((v) => v + 1)}
+                />
+              </div>
+
+              {/* Frame gallery */}
+              <div className="mt-3 pt-3 border-t border-border">
+                <FrameGallery
+                  recordingFilename={meeting.recording_filename}
+                  version={framesVersion}
                 />
               </div>
             </>
