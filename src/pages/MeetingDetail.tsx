@@ -189,6 +189,12 @@ export default function MeetingDetail() {
           )}
         </div>
       </div>
+
+      {showChat && (
+        <div className="mt-6 border border-border rounded-lg overflow-hidden bg-card" style={{ height: 420 }}>
+          <AIChatPanel meetingId={id} meetingTitle={meeting.title} />
+        </div>
+      )}
     </div>
   );
 }
