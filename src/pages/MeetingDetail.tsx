@@ -29,6 +29,7 @@ export default function MeetingDetail() {
   const queryClient = useQueryClient();
   const updateMeeting = useUpdateMeeting();
   const deleteMeeting = useDeleteMeeting();
+  const buildKnowledge = useBuildKnowledge();
 
   // Editable title state
   const [editingTitle, setEditingTitle] = useState(false);
