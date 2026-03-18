@@ -12,6 +12,7 @@ import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
 import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
+import RecordingSplitter from "@/components/RecordingSplitter";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
@@ -227,6 +228,17 @@ export default function MeetingDetail() {
                     recordingUrl={recordingUrl}
                     recordingFilename={meeting.recording_filename}
                     onComplete={() => setFramesVersion((v) => v + 1)}
+                  />
+                </div>
+              )}
+
+              {/* Recording splitter */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <RecordingSplitter
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                    recordingSizeBytes={meeting.recording_size_bytes}
                   />
                 </div>
               )}
