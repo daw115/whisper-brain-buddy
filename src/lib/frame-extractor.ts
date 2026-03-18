@@ -31,33 +31,27 @@ export async function extractFrames(
     const video = document.createElement("video");
     video.muted = true;
     video.preload = "auto";
+    video.playsInline = true;
     video.src = url;
 
     onProgress?.({ phase: "loading", current: 0, total: 1, percent: 0 });
 
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Failed to load video"));
-      setTimeout(() => reject(new Error("Video load timeout")), 30_000);
-    });
+    await waitForMetadata(video, signal);
 
     if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
 
     onProgress?.({ phase: "loading", current: 1, total: 1, percent: 100 });
 
-    const duration = video.duration;
+    const duration = await resolveVideoDuration(video, signal);
     if (!duration || !isFinite(duration)) return [];
 
-    const timestamps: number[] = [];
-    for (let t = 5; t < duration && timestamps.length < maxFrames; t += intervalSeconds) {
-      timestamps.push(t);
-    }
-    if (duration > 10 && timestamps[timestamps.length - 1] < duration - 10) {
-      timestamps.push(Math.max(0, duration - 5));
-    }
+    const timestamps = buildTimestamps(duration, intervalSeconds, maxFrames);
+    if (timestamps.length === 0) return [];
 
     const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Nie udało się utworzyć kontekstu canvas");
+
     const frames: ExtractedFrame[] = [];
     let prevHash = "";
 
@@ -72,29 +66,34 @@ export async function extractFrames(
         percent: Math.round(((i + 1) / timestamps.length) * 100),
       });
 
-      video.currentTime = ts;
-      await new Promise<void>((resolve) => {
-        video.onseeked = () => resolve();
-        setTimeout(resolve, 3000);
-      });
+      await seekVideo(video, ts, signal);
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const sample = ctx.getImageData(
         Math.floor(canvas.width / 4),
         Math.floor(canvas.height / 4),
-        Math.min(100, canvas.width),
-        Math.min(100, canvas.height),
+        Math.max(1, Math.min(100, canvas.width)),
+        Math.max(1, Math.min(100, canvas.height)),
       );
       const hash = quickHash(sample.data);
 
       if (hash === prevHash) continue;
       prevHash = hash;
 
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (result) => {
+            if (result) resolve(result);
+            else reject(new Error("Nie udało się zapisać klatki"));
+          },
+          "image/jpeg",
+          0.75,
+        );
+      });
       const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-      const blob = await (await fetch(dataUrl)).blob();
       frames.push({ timestamp: ts, blob, dataUrl });
     }
 
@@ -102,6 +101,132 @@ export async function extractFrames(
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+async function waitForMetadata(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Video load timeout"));
+    }, 30_000);
+
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("Anulowano", "AbortError"));
+    };
+
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("Failed to load video"));
+    };
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    video.addEventListener("loadedmetadata", onLoaded, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function resolveVideoDuration(video: HTMLVideoElement, signal?: AbortSignal): Promise<number | null> {
+  if (isFinite(video.duration) && video.duration > 0) return video.duration;
+
+  try {
+    await seekVideo(video, Number.MAX_SAFE_INTEGER, signal, 5_000);
+    const fixedDuration = video.duration;
+    await seekVideo(video, 0, signal, 3_000).catch(() => undefined);
+    if (isFinite(fixedDuration) && fixedDuration > 0) return fixedDuration;
+  } catch {
+    // ignore and fall back below
+  }
+
+  return null;
+}
+
+function buildTimestamps(duration: number, intervalSeconds: number, maxFrames: number): number[] {
+  const safeDuration = Math.max(duration, 0.1);
+  const lastAllowed = Math.max(0, safeDuration - 0.1);
+  const timestamps: number[] = [];
+
+  const pushUnique = (value: number) => {
+    const clamped = Math.min(Math.max(value, 0), lastAllowed);
+    if (timestamps.some((existing) => Math.abs(existing - clamped) < 0.25)) return;
+    timestamps.push(clamped);
+  };
+
+  if (safeDuration <= 10) {
+    pushUnique(safeDuration / 2);
+    return timestamps;
+  }
+
+  for (let t = 5; t < safeDuration && timestamps.length < maxFrames; t += intervalSeconds) {
+    pushUnique(t);
+  }
+
+  if (timestamps.length === 0) {
+    pushUnique(Math.min(5, safeDuration / 2));
+  }
+
+  if (timestamps.length < maxFrames && safeDuration > 10) {
+    pushUnique(safeDuration - 5);
+  }
+
+  return timestamps.sort((a, b) => a - b).slice(0, maxFrames);
+}
+
+async function seekVideo(
+  video: HTMLVideoElement,
+  time: number,
+  signal?: AbortSignal,
+  timeoutMs = 4_000,
+): Promise<void> {
+  if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
+
+  const targetTime = Math.max(0, Number.isFinite(time) ? time : 0);
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      resolve();
+    }, timeoutMs);
+
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("Anulowano", "AbortError"));
+    };
+
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("Błąd przewijania wideo"));
+    };
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    video.currentTime = targetTime;
+  });
 }
 
 function quickHash(data: Uint8ClampedArray): string {
