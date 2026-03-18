@@ -267,26 +267,13 @@ export default function MeetingDetail() {
                 recordingSizeBytes={meeting.recording_size_bytes}
               />
 
-              {/* Audio extraction & splitting — works with segments via RecordingSegments */}
-              {recordingUrl && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <AudioExtractor
-                    recordingUrl={recordingUrl}
-                    recordingFilename={meeting.recording_filename}
-                    recordingSizeBytes={meeting.recording_size_bytes}
-                    meetingId={meeting.id}
-                    framesVersion={framesVersion}
-                    onTranscriptGenerated={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
-                  />
-                </div>
-              )}
-
-              {/* Segments viewer (batch processing: frames + transcription per segment) */}
+              {/* Segment Toolbox: MP3 extraction, splitting, transcription, frames */}
               <div className="mt-3 pt-3 border-t border-border">
-                <RecordingSegments
-                  key={segmentsVersion}
+                <SegmentToolbox
                   recordingFilename={meeting.recording_filename}
+                  recordingSizeBytes={meeting.recording_size_bytes}
                   meetingId={meeting.id}
+                  framesVersion={framesVersion}
                   onFramesGenerated={() => setFramesVersion((v) => v + 1)}
                   onTranscriptGenerated={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
                 />
