@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Download, Copy, Check, ImageIcon, Loader2, FileText, Music, Package, Archive } from "lucide-react";
+import { Download, Copy, Check, ImageIcon, Loader2, FileText, Package, Archive } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { MeetingWithRelations } from "@/hooks/use-meetings";
 import { toast } from "sonner";
