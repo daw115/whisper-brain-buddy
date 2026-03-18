@@ -9,6 +9,7 @@ import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import AudioConverter from "@/components/AudioConverter";
+import AIAnalysisButton from "@/components/AIAnalysisButton";
 
 export default function MeetingDetail() {
   const { id } = useParams();
