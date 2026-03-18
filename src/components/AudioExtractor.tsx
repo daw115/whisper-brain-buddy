@@ -65,6 +65,7 @@ export default function AudioExtractor({
   const [splitProgress, setSplitProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [transcribeMode, setTranscribeMode] = useState<"online" | "offline">("online");
   const ffmpegRef = useRef<any>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
