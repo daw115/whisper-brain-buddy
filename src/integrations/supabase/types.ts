@@ -117,6 +117,47 @@ export type Database = {
           },
         ]
       }
+      knowledge_summaries: {
+        Row: {
+          created_at: string
+          id: string
+          key_topics: string[]
+          meeting_id: string
+          project_context: string | null
+          sentiment: string | null
+          summary_text: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key_topics?: string[]
+          meeting_id: string
+          project_context?: string | null
+          sentiment?: string | null
+          summary_text: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key_topics?: string[]
+          meeting_id?: string
+          project_context?: string | null
+          sentiment?: string | null
+          summary_text?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_summaries_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meeting_analyses: {
         Row: {
           analysis_json: Json
@@ -255,6 +296,78 @@ export type Database = {
           id?: string
           name?: string
           pin_code?: string
+        }
+        Relationships: []
+      }
+      project_contexts: {
+        Row: {
+          color: string
+          created_at: string
+          description: string | null
+          id: string
+          keywords: string[]
+          last_activity: string
+          meeting_count: number
+          name: string
+          user_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          keywords?: string[]
+          last_activity?: string
+          meeting_count?: number
+          name: string
+          user_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          keywords?: string[]
+          last_activity?: string
+          meeting_count?: number
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      task_patterns: {
+        Row: {
+          auto_actions: Json | null
+          created_at: string
+          frequency: number
+          id: string
+          keywords: string[]
+          last_seen: string
+          pattern_name: string
+          suggested_category: string | null
+          user_id: string
+        }
+        Insert: {
+          auto_actions?: Json | null
+          created_at?: string
+          frequency?: number
+          id?: string
+          keywords?: string[]
+          last_seen?: string
+          pattern_name: string
+          suggested_category?: string | null
+          user_id: string
+        }
+        Update: {
+          auto_actions?: Json | null
+          created_at?: string
+          frequency?: number
+          id?: string
+          keywords?: string[]
+          last_seen?: string
+          pattern_name?: string
+          suggested_category?: string | null
+          user_id?: string
         }
         Relationships: []
       }
