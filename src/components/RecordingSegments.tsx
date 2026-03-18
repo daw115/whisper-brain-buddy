@@ -188,6 +188,13 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
                       >
                         <Image className="w-3 h-3" />
                       </button>
+                      <button
+                        onClick={() => handleDelete(seg)}
+                        className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                        title="Usuń segment"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </>
                   )}
                 </div>
