@@ -81,7 +81,7 @@ export default function MeetingDetail() {
         .from("meeting_analyses")
         .select("*")
         .eq("meeting_id", id!)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false });
       return (data || []) as { id: string; meeting_id: string; source: string; analysis_json: any; created_at: string }[];
     },
     enabled: !!id,

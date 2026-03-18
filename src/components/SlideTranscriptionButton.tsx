@@ -16,33 +16,51 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<any>(null);
 
+  async function runStep(mode: "captions" | "slides" | "aggregate") {
+    const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
+      body: { meetingId, mode },
+    });
+
+    if (fnError) throw new Error(fnError.message || "Błąd wywołania");
+    if (data?.error) throw new Error(data.error);
+
+    onComplete?.(data?.results ?? null);
+    return data?.results ?? {};
+  }
+
   async function handleTranscribe() {
-    setPhase("captions");
     setError(null);
+    setResults(null);
 
     try {
       toast.info("Krok 1/3: OCR dialogów (napisy z dołu ekranu)…");
       setPhase("captions");
+      const captions = await runStep("captions");
 
-      const { data, error: fnError } = await supabase.functions.invoke("transcribe-slides", {
-        body: { meetingId, mode: "both" },
-      });
+      toast.info("Krok 2/3: OCR slajdów z głównej części ekranu…");
+      setPhase("slides");
+      const slides = await runStep("slides");
 
-      if (fnError) throw new Error(fnError.message || "Błąd wywołania");
-      if (data?.error) throw new Error(data.error);
+      toast.info("Krok 3/3: Agregacja audio + dialogów + unikalnych slajdów…");
+      setPhase("aggregating");
+      const aggregated = await runStep("aggregate");
 
-      setResults(data.results);
+      const mergedResults = {
+        ...captions,
+        ...slides,
+        ...aggregated,
+      };
+
+      setResults(mergedResults);
       setPhase("done");
 
-      const captionCount = data.results?.captions?.total_entries || 0;
-      const slideCount = data.results?.slides?.total_slides || 0;
+      const captionCount = mergedResults?.captions?.total_entries || 0;
+      const slideCount = mergedResults?.slides?.total_slides || 0;
       toast.success(`Gotowe! ${captionCount} dialogów + ${slideCount} slajdów → zagregowano`);
-      onComplete?.(data.results);
     } catch (err: any) {
-      // Even on error, data may have been saved to DB — always refetch
       onComplete?.(null);
       setError(err.message || "Nieznany błąd");
-      toast.error("Błąd: " + (err.message || "nieznany") + " — dane mogły zostać zapisane, odświeżam…");
+      toast.error("Błąd: " + (err.message || "nieznany"));
       setPhase("idle");
     }
   }
@@ -75,7 +93,10 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
           )}
         </div>
         <button
-          onClick={() => { setPhase("idle"); setResults(null); }}
+          onClick={() => {
+            setPhase("idle");
+            setResults(null);
+          }}
           className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
         >
           Uruchom ponownie
@@ -124,7 +145,9 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, onCompl
       )}
 
       <div className="text-[9px] text-muted-foreground/70 text-center leading-relaxed space-y-0.5">
-        <p>3 etapy: <strong>1)</strong> OCR dialogów (napisy z dołu) → <strong>2)</strong> OCR slajdów → <strong>3)</strong> agregacja obu źródeł</p>
+        <p>
+          3 wywołania: <strong>1)</strong> OCR dialogów → <strong>2)</strong> OCR slajdów → <strong>3)</strong> agregacja
+        </p>
       </div>
     </div>
   );
