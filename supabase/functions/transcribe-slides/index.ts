@@ -130,24 +130,30 @@ serve(async (req) => {
     const contentParts: any[] = [];
     contentParts.push({
       type: "text",
-      text: `Jesteś ekspertem OCR/analizy slajdów prezentacji. 
+      text: `Jesteś ekspertem OCR do odczytu napisów/dialogów ze spotkań wideo.
 
-Poniżej ${frames.length} klatek z nagrania spotkania biznesowego. Każda klatka ma timestamp.
+Poniżej ${frames.length} klatek z nagrania spotkania biznesowego (np. Teams, Zoom). Każda klatka ma timestamp.
+
+## CO CZYTAĆ
+Na każdej klatce szukaj **napisów/subtitles/dialogów** — to tekst wyświetlany w **dolnej części ekranu**, zazwyczaj na **czarnym lub ciemnym tle** (pasek z napisami automatycznymi, live captions).
+
+⚠️ IGNORUJ treść slajdów/prezentacji w głównej części ekranu — interesują nas TYLKO dialogi/napisy z paska na dole.
+⚠️ Jeśli na klatce NIE MA napisów na dole — pomiń tę klatkę.
 
 ## ZADANIE
-Dla KAŻDEJ klatki:
-1. Odczytaj CAŁĄ treść widoczną na slajdzie: tytuły, nagłówki, bullet pointy, tekst, dane liczbowe, wykresy (opisz je), tabele (odtwórz je), adnotacje, stopki
-2. Zidentyfikuj typ slajdu (tytułowy, agenda, dane, wykres, tabela, podsumowanie, etc.)
-3. Jeśli slajd się powtarza z minimalną zmianą — pomiń duplikat
+1. Odczytaj tekst z paska napisów na dole ekranu
+2. Zidentyfikuj mówcę (jeśli widoczne imię/nazwa przed tekstem)
+3. Połącz fragmenty z kolejnych klatek w spójne zdania (napisy często są ucięte)
+4. Pomiń duplikaty — te same napisy pojawiają się na wielu klatkach
 
-Zwróć wynik jako uporządkowaną transkrypcję wizualną — chronologiczny zapis tego co było wyświetlane na ekranie.
+## FORMAT WYNIKU
+Chronologiczna transkrypcja dialogów:
+[MM:SS] Mówca: "Pełne zdanie odczytane z napisów"
 
-Format każdej pozycji:
-[MM:SS] 📊 SLAJD (typ): "Tytuł slajdu"
-Treść: pełny tekst ze slajdu, dane, bullet pointy
-Dane: wartości liczbowe, wykresy, tabele (jeśli są)
+Jeśli mówca nieznany, użyj "Uczestnik".
+Łącz fragmenty napisów z kolejnych klatek w kompletne wypowiedzi.
 
-Poniżej slajdy:`,
+Poniżej klatki:`,
     });
 
     for (const frame of frames) {
@@ -178,7 +184,7 @@ Poniżej slajdy:`,
               properties: {
                 slide_transcript: {
                   type: "string",
-                  description: "Pełna transkrypcja wizualna slajdów w formacie chronologicznym. Każda pozycja na nowej linii: [MM:SS] 📊 SLAJD (typ): treść. Zawiera CAŁY tekst odczytany z każdego slajdu.",
+                  description: "Chronologiczna transkrypcja dialogów odczytanych z napisów na dole ekranu. Format: [MM:SS] Mówca: tekst. Połącz fragmenty w kompletne wypowiedzi.",
                 },
                 slides: {
                   type: "array",
@@ -186,19 +192,19 @@ Poniżej slajdy:`,
                     type: "object",
                     properties: {
                       timestamp: { type: "string", description: "Timestamp MM:SS" },
-                      slide_type: { type: "string", description: "Typ slajdu: tytułowy, agenda, dane, wykres, tabela, podsumowanie, etc." },
-                      title: { type: "string", description: "Tytuł/nagłówek slajdu" },
-                      full_text: { type: "string", description: "CAŁY tekst ze slajdu — bullet pointy, dane, opisy" },
-                      data_values: { type: "string", description: "Kluczowe wartości liczbowe, wykresy, tabele (jeśli są)" },
+                      slide_type: { type: "string", description: "Zawsze 'dialog' — napisy z dołu ekranu" },
+                      title: { type: "string", description: "Imię mówcy lub 'Uczestnik'" },
+                      full_text: { type: "string", description: "Pełna treść wypowiedzi odczytana z napisów" },
+                      data_values: { type: "string", description: "null — nie dotyczy dialogów" },
                     },
                     required: ["timestamp", "title", "full_text"],
                     additionalProperties: false,
                   },
-                  description: "Lista slajdów ze szczegółową treścią",
+                  description: "Lista wypowiedzi odczytanych z napisów na dole ekranu",
                 },
                 total_slides: {
                   type: "number",
-                  description: "Łączna liczba unikalnych slajdów",
+                  description: "Łączna liczba unikalnych wypowiedzi",
                 },
               },
               required: ["slide_transcript", "slides", "total_slides"],
