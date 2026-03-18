@@ -53,6 +53,7 @@ export default function AudioExtractor({
   recordingSizeBytes,
   meetingId,
   onAudioReady,
+  onTranscriptGenerated,
 }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
@@ -63,6 +64,7 @@ export default function AudioExtractor({
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [splitProgress, setSplitProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const ffmpegRef = useRef<any>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
