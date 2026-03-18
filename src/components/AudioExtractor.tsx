@@ -44,6 +44,7 @@ const phaseLabels: Record<Phase, string> = {
   uploading: "Przesyłanie MP3 na serwer…",
   splitting: "Dzielenie MP3 na części…",
   "uploading-parts": "Przesyłanie części…",
+  "batch-transcribing": "Transkrypcja segmentów…",
 };
 
 export default function AudioExtractor({
