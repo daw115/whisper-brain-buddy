@@ -372,6 +372,13 @@ export default function MeetingDetail() {
             <p className="text-sm text-muted-foreground italic">No transcript available.</p>
           )}
 
+          {/* Slide Insights from AI analysis */}
+          {analyses.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-border">
+              <SlideInsightsPanel analyses={analyses} />
+            </div>
+          )}
+
           {/* AI Input Preview */}
           <div className="mt-6 pt-4 border-t border-border">
             <AIInputPreview
