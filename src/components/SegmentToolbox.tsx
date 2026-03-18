@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages,
-  Wifi, WifiOff, Image, Images, CheckSquare, Square, ChevronDown, ChevronUp, X
+  Wifi, WifiOff, Image, Images, CheckSquare, Square, ChevronDown, ChevronUp, X, Merge
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
