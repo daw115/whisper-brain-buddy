@@ -159,34 +159,19 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
   async function handleTranscribeSegment(idx: number) {
     const seg = segments[idx];
     if (!seg.signedUrl || !meetingId) return;
+
+    // Require MP3 first
+    if (!mp3Urls[idx]) {
+      toast.info("Najpierw skonwertuj segment do MP3 (ikona ♪), potem transkrybuj", { duration: 4000 });
+      return;
+    }
+
     setTranscribingIdx(idx);
     setTranscribePhase("converting");
 
     try {
-      // Step 1: Get or create MP3
-      let mp3BlobUrl: string;
-      if (mp3Urls[idx]) {
-        mp3BlobUrl = mp3Urls[idx].url;
-        toast.loading(`Używam gotowego MP3 segmentu #${idx + 1}…`, { id: `trans-${idx}` });
-      } else {
-        toast.loading(`Konwersja segmentu #${idx + 1} do MP3…`, { id: `trans-${idx}` });
-        const { fetchFile } = await import("@ffmpeg/util");
-        const ffmpeg = await getFFmpeg();
-        const inputName = `trans_input_${idx}.webm`;
-        const outputName = `trans_output_${idx}.mp3`;
-        const videoData = await fetchFile(seg.signedUrl);
-        await ffmpeg.writeFile(inputName, videoData);
-        await ffmpeg.exec(["-i", inputName, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", outputName]);
-        const rawData = await ffmpeg.readFile(outputName);
-        const mp3Blob = new Blob([rawData as any], { type: "audio/mpeg" });
-        mp3BlobUrl = URL.createObjectURL(mp3Blob);
-        const sizeMB = (mp3Blob.size / (1024 * 1024)).toFixed(1);
-        await ffmpeg.deleteFile(inputName);
-        await ffmpeg.deleteFile(outputName);
-        setMp3Urls((prev) => ({ ...prev, [idx]: { url: mp3BlobUrl, sizeMB } }));
-      }
-
-      // Step 2: Decode MP3 to Float32Array via Web Audio API
+      // Decode MP3 to Float32Array via Web Audio API
+      const mp3BlobUrl = mp3Urls[idx].url;
       toast.loading(`Dekodowanie MP3 segmentu #${idx + 1}…`, { id: `trans-${idx}` });
       const mp3Response = await fetch(mp3BlobUrl);
       const mp3ArrayBuffer = await mp3Response.arrayBuffer();
