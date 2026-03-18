@@ -17,6 +17,7 @@ import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
 import TranscribeButton from "@/components/TranscribeButton";
 import AudioExtractor from "@/components/AudioExtractor";
+import RecordingPanel from "@/components/RecordingPanel";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
