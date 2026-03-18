@@ -136,8 +136,24 @@ export default function MeetingDetail() {
                       </button>
                       <a
                         href={recordingUrl}
-                        download={meeting.recording_filename}
-                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          try {
+                            const res = await fetch(recordingUrl);
+                            const blob = await res.blob();
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = meeting.recording_filename || "recording.webm";
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          } catch {
+                            window.open(recordingUrl, "_blank");
+                          }
+                        }}
+                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5" /> Download
                       </a>
