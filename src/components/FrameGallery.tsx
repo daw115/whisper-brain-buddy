@@ -43,7 +43,7 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
 
       if (frameDirs) {
         for (const d of frameDirs) {
-          if (d.name.startsWith(stem + "_part") && d.id) {
+          if (d.name.startsWith(stem + "_part")) {
             prefixes.push(d.name);
           }
         }
