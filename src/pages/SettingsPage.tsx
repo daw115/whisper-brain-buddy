@@ -243,7 +243,10 @@ export default function SettingsPage() {
               <>
                 {categories.map((cat) => (
                   <div key={cat.id} className="flex items-center justify-between px-5 py-3 border-b border-border last:border-b-0">
-                    <span className="text-sm font-medium text-foreground">{cat.name}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
+                      <span className="text-sm font-medium text-foreground">{cat.name}</span>
+                    </div>
                     <button
                       onClick={() => deleteCategory(cat)}
                       className="text-muted-foreground hover:text-destructive transition-colors"
