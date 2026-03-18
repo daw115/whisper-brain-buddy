@@ -530,33 +530,41 @@ Kolejność: chronologicznie, zgodnie z timestampami. Zwróć tylko opisy dla do
       const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz dane z tego samego spotkania z dwóch niezależnych źródeł + opisy slajdów.
 
 ${audioTranscript ? `## ŹRÓDŁO 1 (BAZA): TRANSKRYPT AUDIO (Whisper/Gemini STT)
-Timestampy są ciągłe od początku do końca nagrania.
-${audioTranscript.slice(0, 20000)}` : "## ŹRÓDŁO 1: Brak transkryptu audio"}
+Pełna transkrypcja audio z ~50 minut rozmowy. Timestampy są ciągłe od początku do końca nagrania.
+${audioTranscript.slice(0, 25000)}` : "## ŹRÓDŁO 1: Brak transkryptu audio"}
 
 ## ŹRÓDŁO 2: DIALOGI OCR (odczytane z paska live captions na dole ekranu)
-Timestampy odpowiadają momentom pojawienia się klatki.
+Timestampy odpowiadają momentom pojawienia się klatki. Zawierają IMIONA mówców.
 ${ocrDialogText}
 
 ${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (treść prezentacji)
 Każdy slajd podany z timestampem pierwszego pojawienia się.
 ${slideDescText}` : ""}
 
-## ZADANIE — AGREGACJA LINIA PO LINII
+## ZADANIE — ZAGREGOWANA TRANSKRYPCJA
 
-Idź chronologicznie przez transkrypt audio (ŹRÓDŁO 1) i dla każdej linii:
+Wynik ma składać się z DWÓCH sekcji:
 
-1. **Znajdź odpowiednik w OCR** (ŹRÓDŁO 2) po zbliżonym timestampie (±30s tolerancji)
-2. **Porównaj treść** obu wersji tej samej wypowiedzi:
-   - Jeśli audio jest poprawne i zrozumiałe → zostaw audio bez zmian
-   - Jeśli OCR ma lepszą/pełniejszą wersję → użyj wersji OCR
-   - Jeśli OCR ma imię mówcy a audio ma "Mówca"/"unknown" → użyj imienia z OCR
-3. **Slajdy** — w odpowiednich momentach wstaw znacznik 📊 z opisem slajdu (ŹRÓDŁO 3)
-4. **NIE generuj nowych wypowiedzi** — tylko koryguj istniejące na podstawie porównania
-5. **NIE usuwaj linii** z audio — każda linia powinna mieć odpowiednik w wyniku
+### SEKCJA 1: PEŁNA TRANSKRYPCJA ROZMOWY
+Idź chronologicznie przez CAŁY transkrypt audio (ŹRÓDŁO 1) — KAŻDA linia musi trafić do wyniku.
+Dla każdej linii:
+1. **Identyfikuj mówcę** — znajdź odpowiednik w OCR (±30s tolerancji) i użyj IMIENIA mówcy zamiast "Mówca"/"unknown"/"Speaker"
+2. **Popraw błędy** — jeśli OCR ma lepszą/poprawniejszą wersję słowa lub frazy, użyj jej
+3. **Zachowaj PEŁNĄ długość** — NIE skracaj, NIE pomijaj, NIE streszczaj. Cała ~50-minutowa rozmowa musi być w wyniku.
+4. **NIE generuj nowych wypowiedzi** — tylko koryguj istniejące
+5. **NIE wstawiaj slajdów** w tej sekcji — slajdy idą osobno w sekcji 2
 
-Format wyniku:
-[MM:SS] Mówca: wypowiedź
-[MM:SS] 📊 SLAJD: "Tytuł" — opis treści slajdu`;
+Format linii: [MM:SS] Imię: wypowiedź
+
+### SEKCJA 2: SLAJDY I ICH PODSUMOWANIA
+Pod transkrypcją rozmowy, umieść sekcję ze WSZYSTKIMI slajdami (ŹRÓDŁO 3).
+Dla każdego slajdu podaj:
+- Timestamp pierwszego pojawienia się
+- Tytuł slajdu
+- Pełny opis treści (bullet pointy, dane, wykresy)
+- Krótkie podsumowanie merytoryczne
+
+Format: 📊 [MM:SS] "Tytuł" — opis i podsumowanie`;
 
       const aggregateResult = await callAI(
         [{ type: "text", text: aggregatePrompt }],
