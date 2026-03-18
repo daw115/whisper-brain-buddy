@@ -236,26 +236,7 @@ export function useRecorder(): RecordingState {
         setLastRecording({ blob, filename: meetingFilename, url: signedUrl });
 
         // Extract frames in background
-        toast.loading("Wyodrębnianie klatek…", { id: "frames" });
-        try {
-          const frames = await extractFrames(blob, 30, 30);
-          if (frames.length > 0) {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              const stem = filename.replace(/\.[^.]+$/, "");
-              await uploadFrames(supabase, user.id, stem, frames);
-              toast.success(`${frames.length} klatek przechwyconych`, {
-                id: "frames",
-                duration: 4000,
-              });
-            }
-          } else {
-            toast.dismiss("frames");
-          }
-        } catch (err) {
-          console.error("Frame extraction error:", err);
-          toast.dismiss("frames");
-        }
+        extractFramesFromSegment(blob, filename);
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
