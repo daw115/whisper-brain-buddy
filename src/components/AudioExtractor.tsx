@@ -32,6 +32,7 @@ interface Props {
   recordingSizeBytes?: number | null;
   meetingId: string;
   onAudioReady?: (segments: { url: string; name: string }[]) => void;
+  onTranscriptGenerated?: () => void;
 }
 
 type Phase = "idle" | "downloading" | "converting" | "uploading" | "splitting" | "uploading-parts";
