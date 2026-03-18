@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages,
-  Wifi, WifiOff, Image, Images, CheckSquare, Square, ChevronDown, ChevronUp, X
+  Wifi, WifiOff, Image, Images, CheckSquare, Square, ChevronDown, ChevronUp, X, Merge
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -49,7 +49,7 @@ interface Props {
   onTranscriptGenerated?: () => void;
 }
 
-type Phase = "idle" | "extracting-mp3" | "splitting" | "uploading-parts" | "batch-transcribing" | "batch-frames";
+type Phase = "idle" | "extracting-mp3" | "splitting" | "uploading-parts" | "batch-transcribing" | "batch-frames" | "merging";
 
 export default function SegmentToolbox({
   recordingFilename,
@@ -495,6 +495,46 @@ export default function SegmentToolbox({
     }
   }
 
+  // --- TOOL 5: Merge segment transcripts into continuous stream ---
+  async function handleMergeTranscripts() {
+    setPhase("merging");
+    try {
+      // Fetch all transcript lines for this meeting
+      const { data: lines, error } = await supabase
+        .from("transcript_lines")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("line_order", { ascending: true });
+
+      if (error) throw error;
+      if (!lines || lines.length === 0) { toast.info("Brak transkryptu do scalenia"); return; }
+
+      // Remove segment prefixes (Seg1:, Seg2:) from speaker names
+      const cleaned = lines.map((l, i) => {
+        let speaker = l.speaker;
+        // Strip "Seg1:" prefix if present
+        speaker = speaker.replace(/^Seg\d+:\s*/, "");
+        if (!speaker || speaker === "unknown") speaker = "Mówca";
+        return { ...l, speaker, line_order: i };
+      });
+
+      // Batch update
+      for (const line of cleaned) {
+        await supabase
+          .from("transcript_lines")
+          .update({ speaker: line.speaker, line_order: line.line_order })
+          .eq("id", line.id);
+      }
+
+      toast.success(`Scalono ${cleaned.length} linii transkryptu`);
+      onTranscriptGenerated?.();
+    } catch (err: any) {
+      toast.error("Błąd: " + (err.message || "nieznany"));
+    } finally {
+      setPhase("idle");
+    }
+  }
+
   // Helpers
   function getSelectedVideoSegments() { return videoSegments.filter((_, i) => selectedVideo.has(i)); }
   function getSelectedAudioSegments() { return audioSegments.filter((_, i) => selectedAudio.has(i)); }
@@ -661,6 +701,14 @@ export default function SegmentToolbox({
             >
               {phase === "splitting" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Scissors className="w-3.5 h-3.5" />}
               Podziel MP3 ({selectedAudio.size})
+            </button>
+            <button
+              onClick={handleMergeTranscripts}
+              disabled={busy}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-border bg-card hover:bg-muted/50 text-foreground transition-colors disabled:opacity-50"
+            >
+              {phase === "merging" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />}
+              Scal transkrypty
             </button>
           </div>
 

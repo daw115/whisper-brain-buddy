@@ -14,6 +14,7 @@ import AnalysisComparison from "@/components/AnalysisComparison";
 import FrameGallery from "@/components/FrameGallery";
 import RecordingPanel from "@/components/RecordingPanel";
 import SegmentToolbox from "@/components/SegmentToolbox";
+import AIInputPreview from "@/components/AIInputPreview";
 import { toast } from "sonner";
 import { useBuildKnowledge } from "@/hooks/use-knowledge";
 
@@ -369,6 +370,17 @@ export default function MeetingDetail() {
           ) : (
             <p className="text-sm text-muted-foreground italic">No transcript available.</p>
           )}
+
+          {/* AI Input Preview */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <AIInputPreview
+              meetingId={meeting.id}
+              meetingTitle={meeting.title}
+              transcriptLines={meeting.transcript_lines || []}
+              recordingFilename={meeting.recording_filename}
+              framesVersion={framesVersion}
+            />
+          </div>
         </div>
 
         {/* Right: Action Items + Participants + Analysis Comparison */}
