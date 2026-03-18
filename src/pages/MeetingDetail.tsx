@@ -245,7 +245,7 @@ export default function MeetingDetail() {
 
           {/* ChatGPT Analysis Kit */}
           <div className="mt-6 pt-4 border-t border-border">
-            <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} />
+            <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} framesVersion={framesVersion} />
           </div>
 
           {/* ChatGPT JSON Importer */}
