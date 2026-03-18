@@ -355,53 +355,98 @@ export default function AudioExtractor({
     setPhase("batch-transcribing");
     setBatchProgress({ current: 0, total: segsWithUrl.length });
 
-    // First delete existing transcript lines for this meeting
+    // Delete existing transcript lines
     await supabase.from("transcript_lines").delete().eq("meeting_id", meetingId);
 
     let allLines: { timestamp: string; speaker: string; text: string }[] = [];
     let globalLineOrder = 0;
 
+    // Load Whisper model once if offline mode
+    let transcriber: any = null;
+    if (transcribeMode === "offline") {
+      toast.loading("Ładowanie modelu Whisper (~50 MB)…", { id: "batch-transcribe" });
+      try {
+        const { pipeline } = await import("@huggingface/transformers");
+        transcriber = await pipeline("automatic-speech-recognition", "onnx-community/whisper-small", {
+          dtype: "q4",
+          device: "wasm",
+        });
+      } catch (err: any) {
+        toast.error("Nie udało się załadować Whisper: " + err.message, { id: "batch-transcribe" });
+        setPhase("idle");
+        setBatchProgress({ current: 0, total: 0 });
+        return;
+      }
+    }
+
+    const whisperLangMap: Record<string, string> = {
+      pl: "polish", en: "english", de: "german", fr: "french", es: "spanish",
+      it: "italian", pt: "portuguese", uk: "ukrainian", ru: "russian", cs: "czech",
+    };
+
     for (let i = 0; i < segsWithUrl.length; i++) {
       const seg = segsWithUrl[i];
       setBatchProgress({ current: i + 1, total: segsWithUrl.length });
-      toast.loading(`Transkrypcja segmentu ${i + 1}/${segsWithUrl.length}…`, { id: "batch-transcribe" });
+      toast.loading(`Transkrypcja segmentu ${i + 1}/${segsWithUrl.length} (${transcribeMode === "offline" ? "Whisper" : "Gemini"})…`, { id: "batch-transcribe" });
 
       try {
-        // Download segment and convert to base64
         const res = await fetch(seg.signedUrl!);
         const blob = await res.blob();
         const bytes = new Uint8Array(await blob.arrayBuffer());
 
-        const sizeMB = bytes.length / (1024 * 1024);
-        if (sizeMB > 20) {
-          toast.warning(`Segment ${i + 1} za duży (${sizeMB.toFixed(1)} MB) — pominięto`, { id: "batch-transcribe" });
-          continue;
+        let lines: { timestamp: string; speaker: string; text: string }[] = [];
+
+        if (transcribeMode === "online") {
+          // Gemini via edge function
+          const sizeMB = bytes.length / (1024 * 1024);
+          if (sizeMB > 20) {
+            toast.warning(`Segment ${i + 1} za duży (${sizeMB.toFixed(1)} MB) — pominięto`, { id: "batch-transcribe" });
+            continue;
+          }
+          const base64 = uint8ToBase64(bytes);
+          const { data, error } = await supabase.functions.invoke("transcribe-audio", {
+            body: { audioBase64: base64, mimeType: "audio/mpeg", language },
+          });
+          if (error) { console.error(`Seg ${i + 1}:`, error); continue; }
+          if (data?.error) { console.error(`Seg ${i + 1}:`, data.error); toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" }); continue; }
+          lines = (data?.lines || []).map((l: any) => ({
+            timestamp: l.timestamp || "00:00",
+            speaker: l.speaker || "Mówca",
+            text: l.text,
+          })).filter((l: any) => l.text?.trim());
+        } else {
+          // Whisper offline
+          const audioCtx = new AudioContext({ sampleRate: 16000 });
+          const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
+          const channelData = audioBuffer.getChannelData(0);
+          await audioCtx.close();
+
+          const result = await transcriber(channelData, {
+            language: whisperLangMap[language] || "polish",
+            task: "transcribe",
+            return_timestamps: true,
+            chunk_length_s: 30,
+            stride_length_s: 5,
+          });
+
+          const chunks = (result as any).chunks || [];
+          if (chunks.length > 0) {
+            lines = chunks.map((chunk: any) => {
+              const startSec = chunk.timestamp?.[0] || 0;
+              const mins = Math.floor(startSec / 60);
+              const secs = Math.floor(startSec % 60);
+              return {
+                timestamp: `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`,
+                speaker: "Mówca",
+                text: (chunk.text || "").trim(),
+              };
+            }).filter((l: any) => l.text.length > 0);
+          } else {
+            const text = typeof result === "string" ? result : (result as any).text || "";
+            if (text.trim()) lines = [{ timestamp: "00:00", speaker: "Mówca", text: text.trim() }];
+          }
         }
 
-        const base64 = uint8ToBase64(bytes);
-
-        const { data, error } = await supabase.functions.invoke("transcribe-audio", {
-          body: { audioBase64: base64, mimeType: "audio/mpeg", language },
-        });
-
-        if (error) {
-          console.error(`Segment ${i + 1} error:`, error);
-          toast.warning(`Segment ${i + 1}: ${error.message || "błąd"}`, { id: "batch-transcribe" });
-          continue;
-        }
-        if (data?.error) {
-          console.error(`Segment ${i + 1} AI error:`, data.error);
-          toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" });
-          continue;
-        }
-
-        const lines = (data?.lines || []).map((l: any) => ({
-          timestamp: l.timestamp || "00:00",
-          speaker: l.speaker || "Mówca",
-          text: l.text,
-        })).filter((l: any) => l.text?.trim());
-
-        // Save lines to DB immediately
         if (lines.length > 0) {
           const rows = lines.map((line: any) => ({
             meeting_id: meetingId,
@@ -410,16 +455,13 @@ export default function AudioExtractor({
             text: line.text,
             line_order: globalLineOrder++,
           }));
-
           const { error: insertError } = await supabase.from("transcript_lines").insert(rows);
-          if (insertError) {
-            console.error(`Segment ${i + 1} insert error:`, insertError);
-          }
+          if (insertError) console.error(`Seg ${i + 1} insert:`, insertError);
           allLines.push(...lines);
         }
 
-        // Small delay to avoid rate limiting
-        if (i < segsWithUrl.length - 1) {
+        // Delay for online mode to avoid rate limiting
+        if (transcribeMode === "online" && i < segsWithUrl.length - 1) {
           await new Promise((r) => setTimeout(r, 2000));
         }
       } catch (err: any) {
@@ -428,7 +470,11 @@ export default function AudioExtractor({
       }
     }
 
-    // Update meeting summary
+    // Dispose Whisper model
+    if (transcriber) {
+      try { await transcriber.dispose?.(); } catch {}
+    }
+
     if (allLines.length > 0) {
       const fullText = allLines.map((l) => l.text).join(" ");
       await supabase.from("meetings").update({ summary: fullText.slice(0, 500) }).eq("id", meetingId);
@@ -439,8 +485,7 @@ export default function AudioExtractor({
 
     if (allLines.length > 0) {
       toast.success(`Transkrypcja zakończona — ${allLines.length} fragmentów z ${segsWithUrl.length} segmentów`, {
-        id: "batch-transcribe",
-        duration: 5000,
+        id: "batch-transcribe", duration: 5000,
       });
       onTranscriptGenerated?.();
     } else {
