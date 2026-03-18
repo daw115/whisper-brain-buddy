@@ -164,45 +164,60 @@ ${transcriptLines.length > 0 ? `\nŁącznie: ${transcriptLines.length} linii tra
       : `TRANSKRYPT: Brak automatycznego transkryptu.
 WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
-    const slideTranscriptSection = slideTranscript
-      ? `\nTRANSKRYPCJA WIZUALNA SLAJDÓW (OCR z Gemini):
+    // Use integrated transcript if available (already merged audio+slides by Gemini)
+    const hasIntegrated = !!integratedTranscript;
+
+    const transcriptSection = hasIntegrated
+      ? `ZAGREGOWANA TRANSKRYPCJA (audio + slajdy, chronologicznie):
 ---
-${slideTranscript.slice(0, 10000)}
+${integratedTranscript!.slice(0, 20000)}
 ---
-Powyżej znajduje się odczytana treść slajdów prezentacji z timestampami. Użyj jej do:
-- Weryfikacji/korekty transkryptu audio
-- Uzupełnienia danych liczbowych ze slajdów
-- Połączenia dialogu z odpowiednimi slajdami chronologicznie`
-      : "";
+Powyższa transkrypcja łączy dialog uczestników z treścią slajdów (oznaczonych 📊 SLAJD:).
+Została już zweryfikowana i skorygowana — traktuj ją jako główne źródło danych.`
+      : hasTranscript
+      ? `TRANSKRYPT AUDIO${hasSegmentSources ? " (z wielu segmentów, oznaczony źródłem)" : " (z Web Speech API, może zawierać błędy)"}:
+---
+${transcriptLines
+  .sort((a, b) => a.line_order - b.line_order)
+  .map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`)
+  .join("\n")
+  .slice(0, 15000)}
+---`
+      : `TRANSKRYPT: Brak automatycznego transkryptu.
+WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
     const frameSection = frames.length > 0
-      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji (z nagrania głównego i/lub segmentów).
+      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji.
 Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
-Powiąż treść slajdów z rozmową.`
+Powiąż treść slajdów z dialogiem w transkrypcji.`
       : "";
 
     return `Przeanalizuj spotkanie biznesowe i zwróć wynik w formacie JSON.
 
 DANE WEJŚCIOWE:
+${hasIntegrated ? "- Zagregowana transkrypcja (dialog + slajdy w jednym dokumencie chronologicznym)" : ""}
+${!hasIntegrated && hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii` : ""}
 ${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
 ${frames.length > 0 ? `- ${frames.length} zrzutów ekranu slajdów prezentacji (wgrane jako obrazy)` : ""}
-${hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
-${slideTranscript ? "- Transkrypcja wizualna slajdów (OCR) — odczytana treść prezentacji z timestampami" : ""}
 
 ${transcriptSection}
-${slideTranscriptSection}
 ${frameSection}
 
 ZADANIA:
-1. ${hasTranscript ? "Przeanalizuj dostarczony transkrypt" : "Odsłuchaj/przeanalizuj plik MP3 — stranskrybuj rozmowę"}
-${hasTranscript && recordingUrl ? "2. Jeśli wgrany jest też MP3 — odsłuchaj go i uzupełnij/zweryfikuj transkrypt" : ""}
-${frames.length > 0 ? `${hasTranscript && recordingUrl ? "3" : "2"}. Przeanalizuj treść slajdów — odczytaj tekst, dane, wykresy` : ""}
-${frames.length > 0 ? `${hasTranscript && recordingUrl ? "4" : "3"}. Powiąż kontekst rozmowy z odpowiednimi slajdami` : ""}
+1. Na podstawie transkrypcji${hasIntegrated ? " (która już łączy dialog z treścią slajdów)" : ""} przeanalizuj przebieg spotkania
+${frames.length > 0 ? "2. Przeanalizuj załączone obrazy slajdów — zweryfikuj dane, odczytaj wykresy/tabele, wyłap szczegóły nieujęte w transkrypcji" : ""}
+${frames.length > 0 ? "3. Dla KAŻDEGO slajdu opisz: co zawiera, co mówiono w kontekście, jakie decyzje/wnioski wynikły" : ""}
 - Wyciągnij decyzje, zadania i podsumowanie
+
+SZCZEGÓLNY NACISK NA:
+- **Analiza slajdów**: Każdy slajd = osobny insight z pełną treścią + kontekstem dialogu
+- **Dane liczbowe**: Wyciągnij WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
+- **Rozbieżności**: Co mówiono innego niż jest na slajdach
+- **Kontekst ukryty**: Informacje z dialogu których NIE MA na slajdach (decyzje ustne, komentarze)
 
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
-  "summary": "Zwięzłe podsumowanie spotkania w 2-4 zdaniach po polsku",
+  "summary": "Zwięzłe podsumowanie spotkania w 3-5 zdaniach po polsku, z kluczowymi danymi liczbowymi",
   "sentiment": "pozytywny | neutralny | negatywny | mieszany",
   "participants": ["Imię Nazwisko uczestnika 1", "Imię Nazwisko uczestnika 2"],
   "key_quotes": ["Najważniejszy cytat — Autor"],
@@ -223,21 +238,23 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
   ]${frames.length > 0 ? `,
   "slide_insights": [
     {
-      "slide_description": "Co jest na slajdzie",
-      "context": "Jak slajd odnosi się do dyskusji",
-      "key_data": "Kluczowe dane/wykresy/tabele"
+      "slide_timestamp": "MM:SS",
+      "slide_title": "Tytuł slajdu",
+      "slide_content": "Pełna treść: tytuły, punkty, dane, wykresy",
+      "discussion_context": "Co mówili uczestnicy o tym slajdzie",
+      "extra_context": "Informacje z dialogu których NIE MA na slajdzie",
+      "discrepancies": "Rozbieżności między slajdem a tym co powiedziano (jeśli są)"
     }
   ]` : ""}
 }
 
 ZASADY:
-1. Zidentyfikuj mówców po głosie/kontekście
+1. Zidentyfikuj mówców po kontekście
 2. Action items = konkretne zadania z właścicielem
 3. Decisions = wyraźnie podjęte decyzje
-4. Summary = zwięzłe, po polsku
-5. Tags = główne tematy (max 5)
-${hasSegmentSources ? "6. Transkrypty z segmentów (Seg1, Seg2…) to części tego samego spotkania — potraktuj je jako ciągłą rozmowę" : ""}
-${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiza każdego slajdu i powiązanie z rozmową` : ""}`;
+4. Summary = zwięzłe, z danymi liczbowymi, po polsku
+5. Tags = główne tematy (max 7)
+${frames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!" : ""}`;
   }
 
   function handleCopy() {
