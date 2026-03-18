@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Search, Mic, FileText, CheckSquare, Lightbulb, Loader2 } from "lucide-react";
+import { Search, Mic, FileText, CheckSquare, Lightbulb, Loader2, Plus } from "lucide-react";
 import MeetingCard from "@/components/MeetingCard";
+import CreateMeetingDialog from "@/components/CreateMeetingDialog";
 import { useMeetings } from "@/hooks/use-meetings";
 
 interface DashboardProps {
@@ -9,6 +10,7 @@ interface DashboardProps {
 
 export default function Dashboard({ onStartRecording }: DashboardProps) {
   const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
   const { data: meetings = [], isLoading } = useMeetings();
 
   const filtered = meetings.filter(
@@ -33,14 +35,25 @@ export default function Dashboard({ onStartRecording }: DashboardProps) {
             The memory of your organization, indexed.
           </p>
         </div>
-        <button
-          onClick={onStartRecording}
-          className="flex items-center gap-2 bg-primary text-primary-foreground rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-primary/90 transition-colors press-effect"
-        >
-          <Mic className="w-4 h-4" />
-          New Recording
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 border border-border text-foreground rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-secondary transition-colors press-effect"
+          >
+            <Plus className="w-4 h-4" />
+            Add Meeting
+          </button>
+          <button
+            onClick={onStartRecording}
+            className="flex items-center gap-2 bg-primary text-primary-foreground rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-primary/90 transition-colors press-effect"
+          >
+            <Mic className="w-4 h-4" />
+            New Recording
+          </button>
+        </div>
       </div>
+
+      <CreateMeetingDialog open={showCreate} onClose={() => setShowCreate(false)} />
 
       <div className="grid grid-cols-4 gap-px bg-border rounded-lg overflow-hidden mb-8">
         {[
