@@ -113,6 +113,8 @@ export function useCreateMeeting() {
       recording_filename?: string;
       recording_size_bytes?: number;
       participants?: string[];
+      tags?: string[];
+      summary?: string;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -125,6 +127,8 @@ export function useCreateMeeting() {
           duration: meeting.duration,
           recording_filename: meeting.recording_filename,
           recording_size_bytes: meeting.recording_size_bytes,
+          tags: meeting.tags?.length ? meeting.tags : [],
+          summary: meeting.summary,
         })
         .select()
         .single();
