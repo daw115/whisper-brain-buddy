@@ -370,6 +370,17 @@ export default function MeetingDetail() {
           ) : (
             <p className="text-sm text-muted-foreground italic">No transcript available.</p>
           )}
+
+          {/* AI Input Preview */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <AIInputPreview
+              meetingId={meeting.id}
+              meetingTitle={meeting.title}
+              transcriptLines={meeting.transcript_lines || []}
+              recordingFilename={meeting.recording_filename}
+              framesVersion={framesVersion}
+            />
+          </div>
         </div>
 
         {/* Right: Action Items + Participants + Analysis Comparison */}
