@@ -337,10 +337,11 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
     let totalFrames = 0;
 
     try {
-      const { extractFrames, uploadFrames } = await import("@/lib/frame-extractor");
+      const { extractFramesWithDuration, uploadFrames } = await import("@/lib/frame-extractor");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Nie zalogowano");
 
+      let cumulativeOffsetSec = 0;
       for (let i = 0; i < segsWithUrl.length; i++) {
         if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
         const seg = segsWithUrl[i];
@@ -351,9 +352,9 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
         if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
 
         setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: "extracting", percent: 0 });
-        const frames = await extractFrames(videoBlob, batchInterval, 50, (info) => {
+        const { frames, durationSec } = await extractFramesWithDuration(videoBlob, batchInterval, 50, (info) => {
           setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: info.phase, percent: info.percent });
-        }, ac.signal);
+        }, ac.signal, cumulativeOffsetSec);
 
         if (frames.length > 0) {
           const segStem = seg.name.replace(/\.[^.]+$/, "");
@@ -362,6 +363,7 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
           }, ac.signal);
           totalFrames += frames.length;
         }
+        cumulativeOffsetSec += durationSec;
       }
 
       toast.success(`Wygenerowano ${totalFrames} klatek z ${segsWithUrl.length} segmentów`);

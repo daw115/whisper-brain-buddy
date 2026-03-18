@@ -511,11 +511,12 @@ export default function SegmentToolbox({
     setBatchProgress({ current: 0, total: selected.length, percent: 0 });
 
     try {
-      const { extractFrames, uploadFrames } = await import("@/lib/frame-extractor");
+      const { extractFramesWithDuration, uploadFrames } = await import("@/lib/frame-extractor");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Nie zalogowano");
 
       let totalFrames = 0;
+      let cumulativeOffsetSec = 0;
       for (let i = 0; i < selected.length; i++) {
         if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
         const seg = selected[i];
@@ -524,13 +525,14 @@ export default function SegmentToolbox({
 
         const res = await fetch(seg.signedUrl!);
         const videoBlob = await res.blob();
-        const frames = await extractFrames(videoBlob, frameInterval, 50, undefined, ac.signal);
+        const { frames, durationSec } = await extractFramesWithDuration(videoBlob, frameInterval, 50, undefined, ac.signal, cumulativeOffsetSec);
 
         if (frames.length > 0) {
           const segStem = seg.name.replace(/\.[^.]+$/, "");
           await uploadFrames(supabase, user.id, segStem, frames, undefined, ac.signal);
           totalFrames += frames.length;
         }
+        cumulativeOffsetSec += durationSec;
       }
 
       toast.success(`Wygenerowano ${totalFrames} klatek z ${selected.length} segmentów`, { id: "batch-frames" });
