@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain } from "lucide-react";
-import { useMeeting } from "@/hooks/use-meetings";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain, FolderOpen } from "lucide-react";
+import { useMeeting, useCategories } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
 import AIChatPanel from "@/components/AIChatPanel";
@@ -12,6 +12,7 @@ import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import GeminiAnalysisButton from "@/components/GeminiAnalysisButton";
 import FrameRegenerator from "@/components/FrameRegenerator";
 import AnalysisComparison from "@/components/AnalysisComparison";
+import { toast } from "sonner";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -20,6 +21,22 @@ export default function MeetingDetail() {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const { data: categories = [] } = useCategories();
+  const queryClient = useQueryClient();
+
+  const updateCategory = async (categoryId: string | null) => {
+    const { error } = await supabase
+      .from("meetings")
+      .update({ category_id: categoryId })
+      .eq("id", id!);
+    if (error) {
+      toast.error("Nie udało się zmienić kategorii");
+    } else {
+      toast.success("Kategoria zmieniona");
+      queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    }
+  };
 
   // Load analyses from meeting_analyses table
   const { data: analyses = [], refetch: refetchAnalyses } = useQuery({
@@ -103,6 +120,22 @@ export default function MeetingDetail() {
         {tags.length > 0 && (
           <span className="flex items-center gap-1.5"><Tag className="w-3.5 h-3.5" />{tags.join(", ")}</span>
         )}
+        <span className="flex items-center gap-1.5">
+          <FolderOpen className="w-3.5 h-3.5" />
+          <select
+            value={meeting.category_id || ""}
+            onChange={(e) => updateCategory(e.target.value || null)}
+            className="bg-transparent border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-primary/50 cursor-pointer"
+          >
+            <option value="">Bez kategorii</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+          {meeting.categories && (
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meeting.categories.color }} />
+          )}
+        </span>
       </div>
 
       <div className="grid grid-cols-12 gap-px bg-border rounded-lg overflow-hidden">
