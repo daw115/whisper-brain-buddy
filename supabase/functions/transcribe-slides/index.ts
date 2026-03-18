@@ -170,6 +170,32 @@ serve(async (req) => {
       return btoa(binary);
     }
 
+    type CaptionEntry = { timestamp: string; speaker: string; text: string };
+
+    function dedupeCaptionEntries(entries: CaptionEntry[]): CaptionEntry[] {
+      const deduped: CaptionEntry[] = [];
+      for (const entry of entries) {
+        const normalized: CaptionEntry = {
+          timestamp: String(entry.timestamp || "").trim(),
+          speaker: String(entry.speaker || "Unknown").trim(),
+          text: String(entry.text || "").trim(),
+        };
+        if (!normalized.text) continue;
+
+        const previous = deduped[deduped.length - 1];
+        if (
+          previous &&
+          previous.speaker === normalized.speaker &&
+          previous.text === normalized.text
+        ) {
+          continue;
+        }
+
+        deduped.push(normalized);
+      }
+      return deduped;
+    }
+
     const results: Record<string, any> = {};
 
     // ========== STEP 3: DEDUPLICATE FRAMES (batched, no image decoding) ==========
@@ -246,7 +272,7 @@ serve(async (req) => {
 
     // ========== STEP 4: OCR CAPTIONS ==========
     if (selectedMode === "ocr-captions") {
-      console.log("Step 4: OCR caption crops...");
+      console.log(`Step 4: OCR caption crops batch offset=${batchOffset} size=${batchSize}...`);
 
       const cropData = await loadLatest("crop-split") as any;
       if (!cropData?.caption_crops?.length) {
@@ -254,31 +280,32 @@ serve(async (req) => {
       }
 
       const captionCrops = cropData.caption_crops as { path: string; timestamp: number; ts_formatted: string }[];
+      const currentBatchSize = Math.max(1, Math.min(batchSize, 12));
+      const currentBatch = captionCrops.slice(batchOffset, batchOffset + currentBatchSize);
+      const previousResult = batchOffset > 0 ? await loadLatest("captions-ocr") as any : null;
 
-      // Load caption images in batches of 25 for AI
-      const BATCH_SIZE = 25;
-      const allEntries: { timestamp: string; speaker: string; text: string }[] = [];
-      const speakersSet = new Set<string>();
+      if (currentBatch.length === 0) {
+        throw { status: 400, message: "No caption frames left to process" };
+      }
 
-      for (let batchStart = 0; batchStart < captionCrops.length; batchStart += BATCH_SIZE) {
-        const batch = captionCrops.slice(batchStart, batchStart + BATCH_SIZE);
-        const imageParts: any[] = [];
+      const imageParts: any[] = [];
+      for (const cap of currentBatch) {
+        const { data: blob } = await supabaseAdmin.storage.from("recordings").download(cap.path);
+        if (!blob) continue;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const base64 = bytesToBase64(bytes);
+        imageParts.push({ type: "text", text: `\n--- Napis @ ${cap.ts_formatted} ---` });
+        imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
+      }
 
-        for (const cap of batch) {
-          const { data: blob } = await supabaseAdmin.storage.from("recordings").download(cap.path);
-          if (!blob) continue;
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          const base64 = bytesToBase64(bytes);
-          imageParts.push({ type: "text", text: `\n--- Napis @ ${cap.ts_formatted} ---` });
-          imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
-        }
+      if (imageParts.length === 0) {
+        throw { status: 400, message: "Could not load caption frames for OCR" };
+      }
 
-        if (imageParts.length === 0) continue;
-
-        const ocrParts: any[] = [
-          {
-            type: "text",
-            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} screenów z nagrania spotkania Teams.
+      const ocrParts: any[] = [
+        {
+          type: "text",
+          text: `Jesteś ekspertem OCR. Poniżej ${currentBatch.length} screenów z jednego batcha nagrania spotkania Teams.
 
 Na DOLE każdego ekranu znajduje się ciemny pasek z napisami (live captions/subtitles). Zignoruj resztę ekranu (prezentację) — skupiaj się WYŁĄCZNIE na dolnym pasku z napisami.
 
@@ -289,67 +316,76 @@ Na DOLE każdego ekranu znajduje się ciemny pasek z napisami (live captions/sub
 4. Połącz powtarzające się fragmenty w jedno pełne zdanie
 5. NIE duplikuj — jeśli kolejne klatki mają ten sam tekst, zapisz go tylko raz
 
-Zwróć wynik jako listę chronologicznych wypowiedzi.`,
-          },
-          ...imageParts,
-        ];
+Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych screenów.`,
+        },
+        ...imageParts,
+      ];
 
-        const batchResult = await callAI(ocrParts, [{
-          type: "function",
-          function: {
-            name: "save_caption_ocr",
-            description: "Save OCR results from caption bar crops",
-            parameters: {
-              type: "object",
-              properties: {
-                entries: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      timestamp: { type: "string", description: "MM:SS" },
-                      speaker: { type: "string", description: "Imię mówcy" },
-                      text: { type: "string", description: "Pełne zdanie" },
-                    },
-                    required: ["timestamp", "speaker", "text"],
-                    additionalProperties: false,
+      const batchResult = await callAI(ocrParts, [{
+        type: "function",
+        function: {
+          name: "save_caption_ocr",
+          description: "Save OCR results from caption bar crops",
+          parameters: {
+            type: "object",
+            properties: {
+              entries: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    timestamp: { type: "string", description: "MM:SS" },
+                    speaker: { type: "string", description: "Imię mówcy" },
+                    text: { type: "string", description: "Pełne zdanie" },
                   },
-                },
-                speakers: {
-                  type: "array",
-                  items: { type: "string" },
+                  required: ["timestamp", "speaker", "text"],
+                  additionalProperties: false,
                 },
               },
-              required: ["entries", "speakers"],
-              additionalProperties: false,
+              speakers: {
+                type: "array",
+                items: { type: "string" },
+              },
             },
+            required: ["entries", "speakers"],
+            additionalProperties: false,
           },
-        }], { type: "function", function: { name: "save_caption_ocr" } });
+        },
+      }], { type: "function", function: { name: "save_caption_ocr" } });
 
-        if (batchResult.entries) allEntries.push(...batchResult.entries);
-        if (batchResult.speakers) batchResult.speakers.forEach((s: string) => speakersSet.add(s));
-
-        console.log(`OCR batch ${batchStart / BATCH_SIZE + 1}: ${batchResult.entries?.length ?? 0} entries`);
-      }
-
-      // Build transcript text
-      const transcript = allEntries.map(e => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n");
+      const mergedEntries = dedupeCaptionEntries([
+        ...(previousResult?.entries ?? []),
+        ...(batchResult.entries ?? []),
+      ]);
+      const mergedSpeakers = Array.from(new Set([
+        ...(previousResult?.speakers_identified ?? []),
+        ...(batchResult.speakers ?? []),
+      ].filter(Boolean)));
+      const totalProcessed = Math.min(batchOffset + currentBatch.length, captionCrops.length);
+      const hasMore = totalProcessed < captionCrops.length;
+      const transcript = mergedEntries.map((e) => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n");
 
       const ocrResult = {
         transcript,
-        entries: allEntries,
-        total_entries: allEntries.length,
-        speakers_identified: Array.from(speakersSet),
+        entries: mergedEntries,
+        total_entries: mergedEntries.length,
+        speakers_identified: mergedSpeakers,
+        processed_frames: totalProcessed,
+        frames_total: captionCrops.length,
+        has_more: hasMore,
+        next_offset: hasMore ? totalProcessed : null,
       };
 
-      console.log(`OCR total: ${allEntries.length} entries, ${speakersSet.size} speakers`);
+      console.log(`OCR merged total: ${mergedEntries.length} entries, processed ${totalProcessed}/${captionCrops.length}`);
+      await supabase.from("meeting_analyses").delete()
+        .eq("meeting_id", meetingId).eq("source", "captions-ocr");
       await saveAnalysis("captions-ocr", ocrResult);
       results.captions = ocrResult;
     }
 
     // ========== STEP 5: DESCRIBE SLIDES ==========
     if (selectedMode === "describe-slides") {
-      console.log("Step 5: Describe unique slides...");
+      console.log(`Step 5: Describe unique slides batch offset=${batchOffset} size=${batchSize}...`);
 
       const cropData = await loadLatest("crop-split") as any;
       if (!cropData?.unique_slides?.length) {
@@ -357,10 +393,16 @@ Zwróć wynik jako listę chronologicznych wypowiedzi.`,
       }
 
       const slides = cropData.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
+      const currentBatchSize = Math.max(1, Math.min(batchSize, 8));
+      const currentBatch = slides.slice(batchOffset, batchOffset + currentBatchSize);
+      const previousResult = batchOffset > 0 ? await loadLatest("slide-descriptions") as any : null;
 
-      // Load slide images for AI (max 25)
+      if (currentBatch.length === 0) {
+        throw { status: 400, message: "No slides left to describe" };
+      }
+
       const imageParts: any[] = [];
-      for (const slide of slides.slice(0, 25)) {
+      for (const slide of currentBatch) {
         const { data: blob } = await supabaseAdmin.storage.from("recordings").download(slide.path);
         if (!blob) continue;
         const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -369,20 +411,24 @@ Zwróć wynik jako listę chronologicznych wypowiedzi.`,
         imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
       }
 
+      if (imageParts.length === 0) {
+        throw { status: 400, message: "Could not load slide frames for description" };
+      }
+
       const describeParts: any[] = [
         {
           type: "text",
-          text: `Jesteś ekspertem od analizy prezentacji. Poniżej ${slides.length} unikalnych slajdów z nagrania spotkania.
+          text: `Jesteś ekspertem od analizy prezentacji. Poniżej ${currentBatch.length} unikalnych slajdów z jednego batcha nagrania spotkania.
 Każdy slajd pojawił się po raz pierwszy w podanym timestampie.
 
 ## ZADANIE
-Dla każdego slajdu:
+Dla każdego dostarczonego slajdu:
 1. Podaj **tytuł** slajdu
 2. Opisz **pełną treść**: bullet pointy, dane liczbowe, wykresy, tabele, diagramy
 3. Wyciągnij **kluczowe informacje** (liczby, nazwy, daty, wnioski)
 4. Krótko opisz **kontekst** slajdu w prezentacji (np. "agenda", "wyniki Q1", "plan działań")
 
-Kolejność: chronologicznie, zgodnie z timestampami.`,
+Kolejność: chronologicznie, zgodnie z timestampami. Zwróć tylko opisy dla dostarczonych slajdów.`,
         },
         ...imageParts,
       ];
@@ -410,7 +456,7 @@ Kolejność: chronologicznie, zgodnie z timestampami.`,
                   additionalProperties: false,
                 },
               },
-              presentation_summary: { type: "string", description: "Krótkie podsumowanie całej prezentacji" },
+              presentation_summary: { type: "string", description: "Krótkie podsumowanie batcha prezentacji" },
             },
             required: ["slides", "presentation_summary"],
             additionalProperties: false,
@@ -418,9 +464,31 @@ Kolejność: chronologicznie, zgodnie z timestampami.`,
         },
       }], { type: "function", function: { name: "save_slide_descriptions" } });
 
-      console.log(`Described ${descResult.slides?.length ?? 0} slides`);
-      await saveAnalysis("slide-descriptions", descResult);
-      results.slideDescriptions = descResult;
+      const mergedSlides = [
+        ...(previousResult?.slides ?? []),
+        ...(descResult.slides ?? []),
+      ];
+      const mergedSummary = [
+        previousResult?.presentation_summary,
+        descResult.presentation_summary,
+      ].filter(Boolean).join("\n\n");
+      const totalProcessed = Math.min(batchOffset + currentBatch.length, slides.length);
+      const hasMore = totalProcessed < slides.length;
+
+      const mergedResult = {
+        slides: mergedSlides,
+        presentation_summary: mergedSummary,
+        processed_slides: totalProcessed,
+        slides_total: slides.length,
+        has_more: hasMore,
+        next_offset: hasMore ? totalProcessed : null,
+      };
+
+      console.log(`Described total ${mergedSlides.length} slides, processed ${totalProcessed}/${slides.length}`);
+      await supabase.from("meeting_analyses").delete()
+        .eq("meeting_id", meetingId).eq("source", "slide-descriptions");
+      await saveAnalysis("slide-descriptions", mergedResult);
+      results.slideDescriptions = mergedResult;
     }
 
     // ========== AGGREGATE (captions + audio + slides) ==========
