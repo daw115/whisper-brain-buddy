@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2, Images, X } from "lucide-react";
+import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2, Images, X, Music, FileAudio } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
@@ -15,10 +15,12 @@ interface SegmentFile {
 
 interface Props {
   recordingFilename: string;
+  meetingId?: string;
   onFramesGenerated?: () => void;
+  onTranscriptGenerated?: () => void;
 }
 
-export default function RecordingSegments({ recordingFilename, onFramesGenerated }: Props) {
+export default function RecordingSegments({ recordingFilename, meetingId, onFramesGenerated, onTranscriptGenerated }: Props) {
   const [segments, setSegments] = useState<SegmentFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
@@ -28,6 +30,13 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
   const [batchProgress, setBatchProgress] = useState<{ segIdx: number; total: number; phase: string; percent: number } | null>(null);
   const [batchInterval, setBatchInterval] = useState(30);
   const batchAbortRef = useRef<AbortController | null>(null);
+
+  // Per-segment MP3 state
+  const [convertingMp3, setConvertingMp3] = useState<number | null>(null);
+  const [mp3Urls, setMp3Urls] = useState<Record<number, { url: string; sizeMB: string }>>({});
+  const [transcribingIdx, setTranscribingIdx] = useState<number | null>(null);
+  const [transcribePhase, setTranscribePhase] = useState("");
+  const ffmpegRef = useRef<any>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
 
@@ -41,14 +50,12 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // List all files in user's folder that match the stem pattern
       const { data: files } = await supabase.storage
         .from("recordings")
         .list(user.id, { limit: 100, sortBy: { column: "name", order: "asc" } });
 
       if (!files) return;
 
-      // Find parts: stem_part1.webm, stem_part2.webm, etc.
       const partFiles = files
         .filter((f) => {
           const n = f.name;
@@ -68,7 +75,6 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
         return;
       }
 
-      // Get signed URLs for all parts
       const segs: SegmentFile[] = [];
       for (const f of partFiles) {
         const path = `${user.id}/${f.name}`;
@@ -93,6 +99,167 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
+  async function getFFmpeg() {
+    if (ffmpegRef.current) return ffmpegRef.current;
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+    const ffmpeg = new FFmpeg();
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+    await ffmpeg.load({
+      coreURL: `${baseURL}/ffmpeg-core.js`,
+      wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+    });
+    ffmpegRef.current = ffmpeg;
+    return ffmpeg;
+  }
+
+  async function handleConvertMp3(idx: number) {
+    const seg = segments[idx];
+    if (!seg.signedUrl) return;
+    setConvertingMp3(idx);
+
+    try {
+      toast.loading(`Konwersja segmentu #${idx + 1} do MP3…`, { id: `mp3-${idx}` });
+      const { fetchFile } = await import("@ffmpeg/util");
+      const ffmpeg = await getFFmpeg();
+
+      const videoData = await fetchFile(seg.signedUrl);
+      await ffmpeg.writeFile("seg_input.webm", videoData);
+
+      await ffmpeg.exec(["-i", "seg_input.webm", "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", "seg_output.mp3"]);
+
+      const rawData = await ffmpeg.readFile("seg_output.mp3");
+      const blob = new Blob([rawData as any], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
+
+      await ffmpeg.deleteFile("seg_input.webm");
+      await ffmpeg.deleteFile("seg_output.mp3");
+
+      setMp3Urls((prev) => ({ ...prev, [idx]: { url, sizeMB } }));
+      toast.success(`MP3 segmentu #${idx + 1}: ${sizeMB} MB`, { id: `mp3-${idx}` });
+    } catch (err: any) {
+      toast.error("Błąd konwersji: " + (err.message || "nieznany"), { id: `mp3-${idx}` });
+    } finally {
+      setConvertingMp3(null);
+    }
+  }
+
+  function handleDownloadMp3(idx: number) {
+    const mp3 = mp3Urls[idx];
+    if (!mp3) return;
+    const seg = segments[idx];
+    const a = document.createElement("a");
+    a.href = mp3.url;
+    a.download = seg.name.replace(/\.[^.]+$/, ".mp3");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  async function handleTranscribeSegment(idx: number) {
+    const seg = segments[idx];
+    if (!seg.signedUrl || !meetingId) return;
+    setTranscribingIdx(idx);
+    setTranscribePhase("converting");
+
+    try {
+      toast.loading(`Transkrypcja segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+
+      const { fetchFile } = await import("@ffmpeg/util");
+      const ffmpeg = await getFFmpeg();
+
+      const videoData = await fetchFile(seg.signedUrl);
+      await ffmpeg.writeFile("tr_input.webm", videoData);
+
+      await ffmpeg.exec(["-i", "tr_input.webm", "-vn", "-ar", "16000", "-ac", "1", "-f", "f32le", "tr_output.pcm"]);
+
+      const pcmData = await ffmpeg.readFile("tr_output.pcm") as Uint8Array;
+      await ffmpeg.deleteFile("tr_input.webm");
+      await ffmpeg.deleteFile("tr_output.pcm");
+
+      const audioData = new Float32Array(pcmData.buffer);
+
+      setTranscribePhase("loading-model");
+      toast.loading(`Ładowanie Whisper…`, { id: `trans-${idx}` });
+
+      const { pipeline } = await import("@huggingface/transformers");
+      const transcriber = await pipeline("automatic-speech-recognition", "onnx-community/whisper-small", {
+        dtype: "q4",
+        device: "wasm",
+      });
+
+      setTranscribePhase("transcribing");
+      toast.loading(`Whisper transkrybuje segment #${idx + 1}…`, { id: `trans-${idx}` });
+
+      const result = await transcriber(audioData, {
+        language: "polish",
+        task: "transcribe",
+        return_timestamps: true,
+        chunk_length_s: 30,
+        stride_length_s: 5,
+      });
+
+      const chunks = (result as any).chunks || [];
+      let lines: { timestamp: string; speaker: string; text: string }[] = [];
+
+      if (chunks.length > 0) {
+        lines = chunks.map((chunk: any) => {
+          const startSec = chunk.timestamp?.[0] || 0;
+          const mins = Math.floor(startSec / 60);
+          const secs = Math.floor(startSec % 60);
+          return {
+            timestamp: `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`,
+            speaker: `Seg${idx + 1}`,
+            text: (chunk.text || "").trim(),
+          };
+        }).filter((l: any) => l.text.length > 0);
+      } else {
+        const text = typeof result === "string" ? result : (result as any).text || "";
+        if (text.trim()) {
+          lines = [{ timestamp: "00:00", speaker: `Seg${idx + 1}`, text: text.trim() }];
+        }
+      }
+
+      if (lines.length === 0) {
+        toast.warning("Nie rozpoznano mowy w segmencie", { id: `trans-${idx}` });
+        return;
+      }
+
+      // Get existing transcript lines count to append (not overwrite)
+      setTranscribePhase("saving");
+      const { data: existing } = await supabase
+        .from("transcript_lines")
+        .select("line_order")
+        .eq("meeting_id", meetingId)
+        .order("line_order", { ascending: false })
+        .limit(1);
+
+      const startOrder = existing && existing.length > 0 ? existing[0].line_order + 1 : 0;
+
+      const rows = lines.map((line, i) => ({
+        meeting_id: meetingId,
+        timestamp: line.timestamp,
+        speaker: line.speaker,
+        text: line.text,
+        line_order: startOrder + i,
+      }));
+
+      const { error: insertError } = await supabase.from("transcript_lines").insert(rows);
+      if (insertError) throw insertError;
+
+      try { await (transcriber as any).dispose?.(); } catch {}
+
+      toast.success(`Segment #${idx + 1}: ${lines.length} linii transkryptu dodanych`, { id: `trans-${idx}`, duration: 4000 });
+      onTranscriptGenerated?.();
+    } catch (err: any) {
+      console.error("Segment transcribe error:", err);
+      toast.error("Błąd: " + (err.message || "nieznany"), { id: `trans-${idx}` });
+    } finally {
+      setTranscribingIdx(null);
+      setTranscribePhase("");
+    }
+  }
+
   async function handleDownload(seg: SegmentFile) {
     if (!seg.signedUrl) return;
     try {
@@ -114,9 +281,7 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
   async function handleDelete(seg: SegmentFile) {
     if (!confirm(`Usunąć segment "${seg.name}"?`)) return;
     try {
-      const { error } = await supabase.storage
-        .from("recordings")
-        .remove([seg.path]);
+      const { error } = await supabase.storage.from("recordings").remove([seg.path]);
       if (error) throw error;
       toast.success(`Usunięto ${seg.name}`);
       setSegments((prev) => prev.filter((s) => s.path !== seg.path));
@@ -158,7 +323,6 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
 
       for (let i = 0; i < segsWithUrl.length; i++) {
         if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
-
         const seg = segsWithUrl[i];
         setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: "loading", percent: 0 });
 
@@ -334,6 +498,44 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
                       >
                         <Download className="w-3 h-3" />
                       </button>
+                      {/* MP3 convert */}
+                      {mp3Urls[idx] ? (
+                        <button
+                          onClick={() => handleDownloadMp3(idx)}
+                          className="p-1 text-primary hover:text-primary/80 transition-colors"
+                          title={`Pobierz MP3 (${mp3Urls[idx].sizeMB} MB)`}
+                        >
+                          <Music className="w-3 h-3" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleConvertMp3(idx)}
+                          disabled={convertingMp3 !== null}
+                          className="p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                          title="Konwertuj do MP3"
+                        >
+                          {convertingMp3 === idx ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Music className="w-3 h-3" />
+                          )}
+                        </button>
+                      )}
+                      {/* Transcribe */}
+                      {meetingId && (
+                        <button
+                          onClick={() => handleTranscribeSegment(idx)}
+                          disabled={transcribingIdx !== null}
+                          className="p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                          title="Transkrybuj segment (Whisper offline)"
+                        >
+                          {transcribingIdx === idx ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <FileAudio className="w-3 h-3" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => setExpandedFrames(expandedFrames === idx ? null : idx)}
                         className={`p-1 transition-colors ${
@@ -356,6 +558,19 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
                   )}
                 </div>
               </div>
+
+              {/* Transcribing indicator */}
+              {transcribingIdx === idx && (
+                <div className="px-3 py-1.5 bg-primary/5 border-t border-border">
+                  <p className="text-[10px] text-primary flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    {transcribePhase === "converting" && "Konwersja audio…"}
+                    {transcribePhase === "loading-model" && "Ładowanie modelu Whisper…"}
+                    {transcribePhase === "transcribing" && "Transkrypcja offline…"}
+                    {transcribePhase === "saving" && "Zapisywanie…"}
+                  </p>
+                </div>
+              )}
 
               {/* Video player */}
               {playingIdx === idx && seg.signedUrl && (
