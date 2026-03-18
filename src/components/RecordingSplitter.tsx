@@ -52,16 +52,34 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
 
       if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
 
-      // 2. Load FFmpeg
+      // 2. Get real duration using <video> element first (reliable for webm)
+      let durationSec = 0;
+      try {
+        const videoUrl = URL.createObjectURL(blob);
+        durationSec = await new Promise<number>((resolve, reject) => {
+          const video = document.createElement("video");
+          video.preload = "metadata";
+          video.onloadedmetadata = () => {
+            const dur = video.duration;
+            URL.revokeObjectURL(videoUrl);
+            if (dur && isFinite(dur) && dur > 0) resolve(dur);
+            else reject(new Error("no duration"));
+          };
+          video.onerror = () => { URL.revokeObjectURL(videoUrl); reject(new Error("video error")); };
+          video.src = videoUrl;
+        });
+      } catch {
+        // will try FFmpeg probe below
+      }
+
+      // 3. Load FFmpeg
       setPhase("splitting");
       toast.loading("Ładowanie FFmpeg…", { id: "split" });
 
       const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile } = await import("@ffmpeg/util");
 
       const ffmpeg = new FFmpeg();
 
-      // Use CDN for the core
       const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
       await ffmpeg.load({
         coreURL: `${baseURL}/ffmpeg-core.js`,
@@ -70,29 +88,28 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
 
       if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
 
-      // 3. Write input file
       const ext = recordingFilename.match(/\.[^.]+$/)?.[0] || ".webm";
       const inputName = `input${ext}`;
       await ffmpeg.writeFile(inputName, inputBytes);
 
-      // 4. Get duration
-      let durationSec = 0;
-      ffmpeg.on("log", ({ message }) => {
-        const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
-        if (match) {
-          durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
-        }
-      });
-
-      // Probe duration with a quick ffmpeg call
-      await ffmpeg.exec(["-i", inputName, "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
+      // 4. If <video> didn't give duration, try FFmpeg probe
+      if (durationSec <= 0) {
+        ffmpeg.on("log", ({ message }) => {
+          const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
+          if (match) {
+            durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
+          }
+        });
+        await ffmpeg.exec(["-i", inputName, "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
+      }
 
       if (durationSec <= 0) {
-        // Fallback: estimate from file size and typical bitrate
-        // ~2 MB/s is typical for screen recording webm
-        durationSec = blob.size / (2 * 1024 * 1024);
-        if (durationSec < 10) durationSec = 60; // minimum fallback
+        // Conservative fallback (~500 KB/s for screen recording webm)
+        durationSec = blob.size / (500 * 1024);
+        if (durationSec < 10) durationSec = 60;
       }
+
+      console.log(`[RecordingSplitter] size=${(blob.size / 1048576).toFixed(1)}MB, duration=${durationSec.toFixed(1)}s, bitrate=${((blob.size / durationSec) / 1024).toFixed(0)}KB/s`);
 
       // Calculate segment duration based on desired MB size
       const bytesPerSec = blob.size / durationSec;

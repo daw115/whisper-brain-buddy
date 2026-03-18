@@ -588,6 +588,27 @@ export default function SegmentToolbox({
       const blob = await res.blob();
       const inputBytes = new Uint8Array(await blob.arrayBuffer());
 
+      // 1. Get real duration using <video> element (much more reliable than FFmpeg probe for webm)
+      toast.loading("Odczytywanie czasu trwania…", { id: "split-video" });
+      let durationSec = 0;
+      try {
+        const videoUrl = URL.createObjectURL(blob);
+        durationSec = await new Promise<number>((resolve, reject) => {
+          const video = document.createElement("video");
+          video.preload = "metadata";
+          video.onloadedmetadata = () => {
+            const dur = video.duration;
+            URL.revokeObjectURL(videoUrl);
+            if (dur && isFinite(dur) && dur > 0) resolve(dur);
+            else reject(new Error("no duration"));
+          };
+          video.onerror = () => { URL.revokeObjectURL(videoUrl); reject(new Error("video error")); };
+          video.src = videoUrl;
+        });
+      } catch {
+        // Fallback: try FFmpeg probe
+      }
+
       toast.loading("Ładowanie FFmpeg…", { id: "split-video" });
       const ffmpeg = await getFFmpeg();
 
@@ -595,22 +616,26 @@ export default function SegmentToolbox({
       const inputName = `split_input${ext}`;
       await ffmpeg.writeFile(inputName, inputBytes);
 
-      // Get duration
-      let durationSec = 0;
-      const logHandler = ({ message }: { message: string }) => {
-        const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
-        if (match) {
-          durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
-        }
-      };
-      ffmpeg.on("log", logHandler);
-      await ffmpeg.exec(["-i", inputName, "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
-      ffmpeg.off("log", logHandler);
+      // If <video> didn't give duration, try FFmpeg probe
+      if (durationSec <= 0) {
+        const logHandler = ({ message }: { message: string }) => {
+          const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
+          if (match) {
+            durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
+          }
+        };
+        ffmpeg.on("log", logHandler);
+        await ffmpeg.exec(["-i", inputName, "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
+        ffmpeg.off("log", logHandler);
+      }
 
       if (durationSec <= 0) {
-        durationSec = blob.size / (2 * 1024 * 1024);
+        // Last resort — very conservative estimate (500 KB/s typical for screen recording webm)
+        durationSec = blob.size / (500 * 1024);
         if (durationSec < 10) durationSec = 60;
       }
+
+      console.log(`[SplitVideo] size=${(blob.size / 1048576).toFixed(1)}MB, duration=${durationSec.toFixed(1)}s, bitrate=${((blob.size / durationSec) / 1024).toFixed(0)}KB/s`);
 
       const chunkBytes = splitChunkMB * 1024 * 1024;
       const bytesPerSec = blob.size / durationSec;
