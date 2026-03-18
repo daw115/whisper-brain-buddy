@@ -15,7 +15,8 @@ serve(async (req) => {
   try {
     const { meetingId, mode } = await req.json();
     if (!meetingId) throw new Error("meetingId is required");
-    // mode: "captions" (dialogi z dołu ekranu), "slides" (treść slajdów), "both" (oba + agregacja)
+
+    // mode: "captions" | "slides" | "aggregate" | "both"
     const selectedMode = mode || "both";
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -31,7 +32,6 @@ serve(async (req) => {
     });
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    // 1. Get meeting
     const { data: meeting, error: meetErr } = await supabase
       .from("meetings")
       .select("id, title, recording_filename, user_id")
@@ -40,108 +40,11 @@ serve(async (req) => {
 
     if (meetErr || !meeting) {
       return new Response(JSON.stringify({ error: "Meeting not found" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (!meeting.recording_filename) {
-      return new Response(JSON.stringify({ error: "No recording filename" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // 2. Load frames
-    const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
-    const dirPrefixes = [`${meeting.user_id}/frames/${stem}`];
-
-    const { data: allDirs } = await supabaseAdmin.storage
-      .from("recordings")
-      .list(`${meeting.user_id}/frames`);
-
-    if (allDirs) {
-      for (const d of allDirs) {
-        if (d.name.startsWith(stem + "_part")) {
-          dirPrefixes.push(`${meeting.user_id}/frames/${d.name}`);
-        }
-      }
-    }
-
-    const allFrameFiles: { path: string; timestamp: number; segPart: string }[] = [];
-    for (const prefix of dirPrefixes) {
-      const segName = prefix.split("/").pop() || "";
-      const { data: files } = await supabaseAdmin.storage
-        .from("recordings")
-        .list(prefix, { limit: 100, sortBy: { column: "name", order: "asc" } });
-
-      if (files) {
-        for (const file of files) {
-          if (!file.name.match(/\.(jpg|jpeg|png)$/i)) continue;
-          const match = file.name.match(/frame_(\d+)/);
-          const ts = match ? parseInt(match[1]) : 0;
-          allFrameFiles.push({ path: `${prefix}/${file.name}`, timestamp: ts, segPart: segName });
-        }
-      }
-    }
-
-    allFrameFiles.sort((a, b) => a.timestamp - b.timestamp);
-    console.log(`Found ${allFrameFiles.length} frame files across ${dirPrefixes.length} directories`);
-
-    if (allFrameFiles.length === 0) {
-      return new Response(JSON.stringify({ error: "No frames found — generate frames first" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // 3. Download & deduplicate frames
-    const frames: { base64: string; mimeType: string; timestamp: string; seconds: number }[] = [];
-    const seenHashes = new Set<string>();
-
-    for (const ff of allFrameFiles.slice(0, 40)) {
-      const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
-      if (!data) continue;
-
-      const bytes = new Uint8Array(await data.arrayBuffer());
-      let hash = 0;
-      const slice = bytes.slice(0, 2048);
-      for (let j = 0; j < slice.length; j += 4) {
-        hash = ((hash << 5) - hash + slice[j]) | 0;
-      }
-      const hashStr = hash.toString(36);
-      if (seenHashes.has(hashStr)) continue;
-      seenHashes.add(hashStr);
-
-      const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
-      const isJpeg = ff.path.match(/\.jpe?g$/i);
-      const mimeType = isJpeg ? "image/jpeg" : "image/png";
-      const mins = Math.floor(ff.timestamp / 60);
-      const secs = ff.timestamp % 60;
-
-      frames.push({
-        base64,
-        mimeType,
-        timestamp: `${mins}:${String(secs).padStart(2, "0")}`,
-        seconds: ff.timestamp,
-      });
-
-      if (frames.length >= 25) break;
-    }
-
-    console.log(`Loaded ${frames.length} unique frames for OCR`);
-
-    // Helper: build image content parts
-    function buildImageParts() {
-      const parts: any[] = [];
-      for (const frame of frames) {
-        parts.push({ type: "text", text: `\n--- Klatka @ ${frame.timestamp} ---` });
-        parts.push({
-          type: "image_url",
-          image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` },
-        });
-      }
-      return parts;
-    }
-
-    // Helper: call AI
     async function callAI(contentParts: any[], tools: any[], toolChoice: any) {
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -158,14 +61,10 @@ serve(async (req) => {
       });
 
       if (!response.ok) {
-        const t = await response.text();
-        console.error("AI gateway error:", response.status, t);
-        if (response.status === 429) {
-          throw { status: 429, message: "Rate limit — spróbuj za chwilę" };
-        }
-        if (response.status === 402) {
-          throw { status: 402, message: "Brak kredytów AI" };
-        }
+        const text = await response.text();
+        console.error("AI gateway error:", response.status, text);
+        if (response.status === 429) throw { status: 429, message: "Rate limit — spróbuj za chwilę" };
+        if (response.status === 402) throw { status: 402, message: "Brak kredytów AI" };
         throw { status: 500, message: `AI error: ${response.status}` };
       }
 
@@ -175,12 +74,139 @@ serve(async (req) => {
         console.error("No tool call in response:", JSON.stringify(aiResult).slice(0, 500));
         throw { status: 500, message: "AI did not return structured result" };
       }
+
       return JSON.parse(toolCall.function.arguments);
     }
 
-    const results: any = {};
+    async function saveAnalysis(source: string, analysisJson: any) {
+      const { error } = await supabase.from("meeting_analyses").insert({
+        meeting_id: meetingId,
+        source,
+        analysis_json: analysisJson,
+      });
 
-    // ========== CAPTIONS OCR (dialogi z paska na dole) ==========
+      if (error) {
+        console.error(`Failed to save ${source}:`, error);
+        throw new Error(`Failed to save ${source}`);
+      }
+    }
+
+    async function loadLatestAnalysis(source: string) {
+      const { data, error } = await supabase
+        .from("meeting_analyses")
+        .select("analysis_json")
+        .eq("meeting_id", meetingId)
+        .eq("source", source)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error(`Failed to load ${source}:`, error);
+        throw new Error(`Failed to load ${source}`);
+      }
+
+      return data?.analysis_json ?? null;
+    }
+
+    async function loadFrames() {
+      if (!meeting.recording_filename) {
+        throw new Error("No recording filename");
+      }
+
+      const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
+      const dirPrefixes = [`${meeting.user_id}/frames/${stem}`];
+
+      const { data: allDirs } = await supabaseAdmin.storage
+        .from("recordings")
+        .list(`${meeting.user_id}/frames`);
+
+      if (allDirs) {
+        for (const d of allDirs) {
+          if (d.name.startsWith(stem + "_part")) {
+            dirPrefixes.push(`${meeting.user_id}/frames/${d.name}`);
+          }
+        }
+      }
+
+      const allFrameFiles: { path: string; timestamp: number; segPart: string }[] = [];
+      for (const prefix of dirPrefixes) {
+        const segName = prefix.split("/").pop() || "";
+        const { data: files } = await supabaseAdmin.storage
+          .from("recordings")
+          .list(prefix, { limit: 100, sortBy: { column: "name", order: "asc" } });
+
+        if (files) {
+          for (const file of files) {
+            if (!file.name.match(/\.(jpg|jpeg|png)$/i)) continue;
+            const match = file.name.match(/frame_(\d+)/);
+            const ts = match ? parseInt(match[1]) : 0;
+            allFrameFiles.push({ path: `${prefix}/${file.name}`, timestamp: ts, segPart: segName });
+          }
+        }
+      }
+
+      allFrameFiles.sort((a, b) => a.timestamp - b.timestamp);
+      console.log(`Found ${allFrameFiles.length} frame files across ${dirPrefixes.length} directories`);
+
+      if (allFrameFiles.length === 0) {
+        throw { status: 400, message: "No frames found — generate frames first" };
+      }
+
+      const frames: { base64: string; mimeType: string; timestamp: string; seconds: number }[] = [];
+      const seenHashes = new Set<string>();
+
+      for (const ff of allFrameFiles.slice(0, 40)) {
+        const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
+        if (!data) continue;
+
+        const bytes = new Uint8Array(await data.arrayBuffer());
+        let hash = 0;
+        const slice = bytes.slice(0, 2048);
+        for (let j = 0; j < slice.length; j += 4) {
+          hash = ((hash << 5) - hash + slice[j]) | 0;
+        }
+
+        const hashStr = hash.toString(36);
+        if (seenHashes.has(hashStr)) continue;
+        seenHashes.add(hashStr);
+
+        const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
+        const isJpeg = ff.path.match(/\.jpe?g$/i);
+        const mimeType = isJpeg ? "image/jpeg" : "image/png";
+        const mins = Math.floor(ff.timestamp / 60);
+        const secs = ff.timestamp % 60;
+
+        frames.push({
+          base64,
+          mimeType,
+          timestamp: `${mins}:${String(secs).padStart(2, "0")}`,
+          seconds: ff.timestamp,
+        });
+
+        if (frames.length >= 25) break;
+      }
+
+      console.log(`Loaded ${frames.length} unique frames for OCR`);
+      return frames;
+    }
+
+    function buildImageParts(frames: { base64: string; mimeType: string; timestamp: string }[]) {
+      const parts: any[] = [];
+      for (const frame of frames) {
+        parts.push({ type: "text", text: `\n--- Klatka @ ${frame.timestamp} ---` });
+        parts.push({
+          type: "image_url",
+          image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` },
+        });
+      }
+      return parts;
+    }
+
+    const results: Record<string, any> = {};
+    const needsFrames = selectedMode === "captions" || selectedMode === "slides" || selectedMode === "both";
+    const frames = needsFrames ? await loadFrames() : [];
+
     if (selectedMode === "captions" || selectedMode === "both") {
       console.log("Running CAPTIONS OCR...");
       const captionParts: any[] = [
@@ -207,55 +233,51 @@ Na każdej klatce szukaj **napisów/subtitles/dialogów** — tekst w **dolnej c
 
 Poniżej klatki:`,
         },
-        ...buildImageParts(),
+        ...buildImageParts(frames),
       ];
 
-      const captionResult = await callAI(captionParts, [{
-        type: "function",
-        function: {
-          name: "save_captions",
-          description: "Save extracted captions/dialogues from video frames",
-          parameters: {
-            type: "object",
-            properties: {
-              transcript: {
-                type: "string",
-                description: "Chronologiczna transkrypcja dialogów z napisów na dole ekranu. Format: [MM:SS] Mówca: tekst.",
-              },
-              entries: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    timestamp: { type: "string" },
-                    speaker: { type: "string" },
-                    text: { type: "string" },
-                  },
-                  required: ["timestamp", "speaker", "text"],
-                  additionalProperties: false,
+      const captionResult = await callAI(
+        captionParts,
+        [{
+          type: "function",
+          function: {
+            name: "save_captions",
+            description: "Save extracted captions/dialogues from video frames",
+            parameters: {
+              type: "object",
+              properties: {
+                transcript: {
+                  type: "string",
+                  description: "Chronologiczna transkrypcja dialogów z napisów na dole ekranu. Format: [MM:SS] Mówca: tekst.",
                 },
+                entries: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      timestamp: { type: "string" },
+                      speaker: { type: "string" },
+                      text: { type: "string" },
+                    },
+                    required: ["timestamp", "speaker", "text"],
+                    additionalProperties: false,
+                  },
+                },
+                total_entries: { type: "number" },
               },
-              total_entries: { type: "number" },
+              required: ["transcript", "entries", "total_entries"],
+              additionalProperties: false,
             },
-            required: ["transcript", "entries", "total_entries"],
-            additionalProperties: false,
           },
-        },
-      }], { type: "function", function: { name: "save_captions" } });
+        }],
+        { type: "function", function: { name: "save_captions" } },
+      );
 
       console.log(`Captions: ${captionResult.total_entries} entries, ${captionResult.transcript?.length ?? 0} chars`);
+      await saveAnalysis("captions-ocr", captionResult);
       results.captions = captionResult;
-
-      // Save captions
-      await supabase.from("meeting_analyses").delete().eq("meeting_id", meetingId).eq("source", "captions-ocr");
-      await supabase.from("meeting_analyses").insert({
-        meeting_id: meetingId,
-        source: "captions-ocr",
-        analysis_json: captionResult,
-      });
     }
 
-    // ========== SLIDES OCR (treść prezentacji) ==========
     if (selectedMode === "slides" || selectedMode === "both") {
       console.log("Running SLIDES OCR...");
       const slideParts: any[] = [
@@ -284,61 +306,66 @@ Dane: wartości liczbowe, wykresy, tabele
 
 Poniżej klatki:`,
         },
-        ...buildImageParts(),
+        ...buildImageParts(frames),
       ];
 
-      const slideResult = await callAI(slideParts, [{
-        type: "function",
-        function: {
-          name: "save_slides",
-          description: "Save extracted slide content from presentation frames",
-          parameters: {
-            type: "object",
-            properties: {
-              slide_transcript: {
-                type: "string",
-                description: "Chronologiczna transkrypcja treści slajdów. Format: [MM:SS] 📊 SLAJD (typ): treść.",
-              },
-              slides: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    timestamp: { type: "string" },
-                    slide_type: { type: "string" },
-                    title: { type: "string" },
-                    full_text: { type: "string" },
-                    data_values: { type: "string" },
-                  },
-                  required: ["timestamp", "title", "full_text"],
-                  additionalProperties: false,
+      const slideResult = await callAI(
+        slideParts,
+        [{
+          type: "function",
+          function: {
+            name: "save_slides",
+            description: "Save extracted slide content from presentation frames",
+            parameters: {
+              type: "object",
+              properties: {
+                slide_transcript: {
+                  type: "string",
+                  description: "Chronologiczna transkrypcja treści slajdów. Format: [MM:SS] 📊 SLAJD (typ): treść.",
                 },
+                slides: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      timestamp: { type: "string" },
+                      slide_type: { type: "string" },
+                      title: { type: "string" },
+                      full_text: { type: "string" },
+                      data_values: { type: "string" },
+                    },
+                    required: ["timestamp", "title", "full_text"],
+                    additionalProperties: false,
+                  },
+                },
+                total_slides: { type: "number" },
               },
-              total_slides: { type: "number" },
+              required: ["slide_transcript", "slides", "total_slides"],
+              additionalProperties: false,
             },
-            required: ["slide_transcript", "slides", "total_slides"],
-            additionalProperties: false,
           },
-        },
-      }], { type: "function", function: { name: "save_slides" } });
+        }],
+        { type: "function", function: { name: "save_slides" } },
+      );
 
       console.log(`Slides: ${slideResult.total_slides} slides, ${slideResult.slide_transcript?.length ?? 0} chars`);
+      await saveAnalysis("slide-transcript", slideResult);
       results.slides = slideResult;
-
-      // Save slides
-      await supabase.from("meeting_analyses").delete().eq("meeting_id", meetingId).eq("source", "slide-transcript");
-      await supabase.from("meeting_analyses").insert({
-        meeting_id: meetingId,
-        source: "slide-transcript",
-        analysis_json: slideResult,
-      });
     }
 
-    // ========== AGGREGATION (jeśli oba gotowe) ==========
-    if (selectedMode === "both" && results.captions && results.slides) {
+    if (selectedMode === "aggregate" || selectedMode === "both") {
       console.log("Running AGGREGATION...");
 
-      // Also load audio transcript if available
+      const captionSource = results.captions ?? await loadLatestAnalysis("captions-ocr");
+      const slideSource = results.slides ?? await loadLatestAnalysis("slide-transcript");
+
+      if (!captionSource || !slideSource) {
+        throw {
+          status: 400,
+          message: "Missing captions or slide transcript — run captions and slides OCR first",
+        };
+      }
+
       const { data: transcriptLines } = await supabase
         .from("transcript_lines")
         .select("timestamp, speaker, text, line_order")
@@ -347,16 +374,16 @@ Poniżej klatki:`,
         .limit(500);
 
       const audioTranscript = transcriptLines && transcriptLines.length > 0
-        ? transcriptLines.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
+        ? transcriptLines.map((line) => `[${line.timestamp}] ${line.speaker}: ${line.text}`).join("\n")
         : null;
 
       const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz 3 źródła danych z tego samego spotkania:
 
 ## ŹRÓDŁO 1: DIALOGI Z NAPISÓW (OCR z paska na dole ekranu)
-${results.captions.transcript || "Brak"}
+${captionSource.transcript || "Brak"}
 
-## ŹRÓDŁO 2: TREŚĆ SLAJDÓW PREZENTACJI (OCR z głównej części ekranu)  
-${results.slides.slide_transcript || "Brak"}
+## ŹRÓDŁO 2: TREŚĆ SLAJDÓW PREZENTACJI (OCR z głównej części ekranu)
+${slideSource.slide_transcript || "Brak"}
 
 ${audioTranscript ? `## ŹRÓDŁO 3: TRANSKRYPT AUDIO (Web Speech API / Whisper)
 ${audioTranscript.slice(0, 10000)}` : "## ŹRÓDŁO 3: Brak transkryptu audio"}
@@ -415,19 +442,12 @@ Format chronologiczny:
             },
           },
         }],
-        { type: "function", function: { name: "save_aggregated_transcript" } }
+        { type: "function", function: { name: "save_aggregated_transcript" } },
       );
 
       console.log(`Aggregated: ${aggregateResult.integrated_transcript?.length ?? 0} chars`);
+      await saveAnalysis("merged", aggregateResult);
       results.aggregated = aggregateResult;
-
-      // Save aggregated result
-      await supabase.from("meeting_analyses").delete().eq("meeting_id", meetingId).eq("source", "merged");
-      await supabase.from("meeting_analyses").insert({
-        meeting_id: meetingId,
-        source: "merged",
-        analysis_json: aggregateResult,
-      });
     }
 
     return new Response(JSON.stringify({ success: true, results }), {
@@ -438,7 +458,7 @@ Format chronologiczny:
     const status = e.status || 500;
     return new Response(
       JSON.stringify({ error: e.message || (e instanceof Error ? e.message : "Unknown error") }),
-      { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });
