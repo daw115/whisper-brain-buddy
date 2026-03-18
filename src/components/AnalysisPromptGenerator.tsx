@@ -293,7 +293,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
     );
   }
 
-  const hasIntegrated = !!integratedTranscript;
+  const hasData = !!audioTranscript || !!ocrCaptions || uniqueFrames.length > 0;
 
   return (
     <div className="space-y-4">
@@ -318,16 +318,18 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
             <Archive className="w-4 h-4" />
             Pobierz ZIP ({[
               "prompt",
-              hasIntegrated ? "transkrypcja" : null,
+              audioTranscript ? "audio" : null,
+              ocrCaptions ? "OCR" : null,
+              slideDescriptions ? "opisy" : null,
               uniqueFrames.length > 0 ? `${uniqueFrames.length} slajdów` : null,
             ].filter(Boolean).join(" + ")})
           </>
         )}
       </button>
 
-      {!hasIntegrated && !uniqueFrames.length && (
+      {!hasData && (
         <p className="text-[10px] text-muted-foreground/60 text-center">
-          ⚠ Najpierw uruchom OCR (klatki + dialogi + agregacja) aby przygotować dane
+          ⚠ Najpierw uruchom transkrypcję audio i/lub OCR aby przygotować dane
         </p>
       )}
 
@@ -335,7 +337,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
           Rozpakuj ZIP i wgraj <strong>wszystkie pliki</strong> do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
-          ChatGPT sam odczyta treść slajdów z obrazów.
+          ChatGPT zagreguje transkrypcję audio z OCR, zidentyfikuje mówców i opisze slajdy.
         </p>
       </div>
 
@@ -344,15 +346,31 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
           <li className="flex items-center gap-1">
             <Check className="w-3 h-3 text-primary" />
-            prompt.txt — instrukcja analizy
+            prompt.txt — instrukcja agregacji i analizy
           </li>
-          {hasIntegrated ? (
+          {audioTranscript ? (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              transkrypcja_zagregowana.txt — dialogi chronologicznie
+              transkrypcja_audio.txt — surowy transkrypt z audio
             </li>
           ) : (
-            <li className="text-muted-foreground/60">✗ Brak zagregowanej transkrypcji — uruchom OCR</li>
+            <li className="text-muted-foreground/60">✗ Brak transkryptu audio</li>
+          )}
+          {ocrCaptions ? (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              dialogi_ocr.txt — dialogi z live captions (z imionami)
+            </li>
+          ) : (
+            <li className="text-muted-foreground/60">✗ Brak dialogów OCR</li>
+          )}
+          {slideDescriptions ? (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              opisy_slajdow.txt — opisy treści slajdów
+            </li>
+          ) : (
+            <li className="text-muted-foreground/60">✗ Brak opisów slajdów</li>
           )}
           {uniqueFrames.length > 0 ? (
             <li className="flex items-center gap-1">
@@ -360,7 +378,7 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
               {uniqueFrames.length} unikalnych slajdów prezentacji (ChatGPT zrobi OCR)
             </li>
           ) : (
-            <li className="text-muted-foreground/60">✗ Brak slajdów — uruchom OCR</li>
+            <li className="text-muted-foreground/60">✗ Brak slajdów</li>
           )}
         </ul>
       </div>
