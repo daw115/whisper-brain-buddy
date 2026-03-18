@@ -293,6 +293,21 @@ export default function TranscribeButton({ meetingId, recordingUrl, recordingFil
         </button>
       </div>
 
+      {/* Language selector */}
+      <div className="flex items-center gap-1.5">
+        <Languages className="w-3 h-3 text-muted-foreground" />
+        <select
+          value={language}
+          onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
+          disabled={busy}
+          className="text-[10px] bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground"
+        >
+          {TRANSCRIPTION_LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
+      </div>
+
       {mode === "offline" && !busy && (
         <p className="text-[10px] text-muted-foreground">
           Whisper small — działa w przeglądarce, bez wysyłania danych. Pierwsze uruchomienie pobierze model (~50 MB).
