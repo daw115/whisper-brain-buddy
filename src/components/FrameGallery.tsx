@@ -115,6 +115,22 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
     }
   }
 
+  async function handleDeleteAll() {
+    if (!frames.length) return;
+    if (!confirm(`Usunąć wszystkie ${frames.length} klatek?`)) return;
+    try {
+      const paths = frames.map((f) => f.path);
+      const { error } = await supabase.storage.from("recordings").remove(paths);
+      if (error) throw error;
+      setFrames([]);
+      setLightboxIdx(null);
+      setExpanded(false);
+      toast.success(`Usunięto ${paths.length} klatek`);
+    } catch (err: any) {
+      toast.error("Błąd: " + (err.message || "nieznany"));
+    }
+  }
+
   function formatTimestamp(secs: number) {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -147,14 +163,24 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
   return (
     <>
       <div className="space-y-2">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider hover:text-foreground transition-colors w-full"
-        >
-          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          <Image className="w-3 h-3" />
-          Klatki ({frames.length})
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            <Image className="w-3 h-3" />
+            Klatki ({frames.length})
+          </button>
+          <button
+            onClick={handleDeleteAll}
+            className="flex items-center gap-1 text-[10px] text-destructive/70 hover:text-destructive transition-colors"
+            title="Usuń wszystkie klatki"
+          >
+            <Trash2 className="w-3 h-3" />
+            Wyczyść
+          </button>
+        </div>
 
         {expanded && (
           <div className="grid grid-cols-3 gap-1.5">
