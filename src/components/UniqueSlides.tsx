@@ -21,7 +21,7 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
 
   const uniqueFramesData = useMemo(() => {
     const entry = analyses.find(a => a.source === "unique-frames");
-    return entry?.analysis_json as { frames?: { path: string; timestamp_formatted: string }[]; total_unique?: number } | null;
+    return entry?.analysis_json as { frames?: { path: string; timestamp_formatted: string }[]; total_unique?: number; total_before_classification?: number } | null;
   }, [analyses]);
 
   useEffect(() => {
