@@ -261,13 +261,13 @@ function AnalysisView({ data }: { data: any }) {
         </div>
       )}
 
-      {/* Integrated transcript — the key new feature */}
-      {data.integrated_transcript && (
+      {/* Integrated transcript — backward compatible */}
+      {(data.conversation_transcript || data.integrated_transcript) && (
         <div>
-          <span className="font-medium text-foreground">📋 Zintegrowany zapis (dialog + slajdy):</span>
+          <span className="font-medium text-foreground">📋 Transkrypcja rozmowy:</span>
           <div className="mt-1 bg-muted/30 border border-border rounded-md p-2 max-h-64 overflow-y-auto">
             <pre className="text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap font-mono-data">
-              {data.integrated_transcript}
+              {data.conversation_transcript || data.integrated_transcript}
             </pre>
           </div>
         </div>

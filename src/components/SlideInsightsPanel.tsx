@@ -31,7 +31,7 @@ export default function SlideInsightsPanel({ analyses }: Props) {
     || analyses.find(a => a.analysis_json?.slide_insights?.length);
 
   const insights: SlideInsight[] = analysisWithSlides?.analysis_json?.slide_insights || [];
-  const integratedTranscript: string | null = analysisWithSlides?.analysis_json?.integrated_transcript || null;
+  const integratedTranscript: string | null = analysisWithSlides?.analysis_json?.conversation_transcript || analysisWithSlides?.analysis_json?.integrated_transcript || null;
 
   if (insights.length === 0 && !integratedTranscript) return null;
 
