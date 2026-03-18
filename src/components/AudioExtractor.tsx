@@ -1,8 +1,23 @@
 import { useState, useRef, useEffect } from "react";
-import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio } from "lucide-react";
+import { Music, Loader2, Scissors, Download, Play, Trash2, FileAudio, Languages } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
+
+export const TRANSCRIPTION_LANGUAGES = [
+  { code: "pl", label: "Polski" },
+  { code: "en", label: "English" },
+  { code: "de", label: "Deutsch" },
+  { code: "fr", label: "Français" },
+  { code: "es", label: "Español" },
+  { code: "uk", label: "Українська" },
+  { code: "ru", label: "Русский" },
+  { code: "it", label: "Italiano" },
+  { code: "pt", label: "Português" },
+  { code: "cs", label: "Čeština" },
+] as const;
+
+export type TranscriptionLanguage = typeof TRANSCRIPTION_LANGUAGES[number]["code"];
 
 interface AudioSegment {
   name: string;
