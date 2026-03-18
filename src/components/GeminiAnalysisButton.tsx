@@ -33,7 +33,7 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
     }
   }, [hasFrames, recordingFilename, framesVersion]);
 
-  async function countUniqueFrames() {
+  async function countUniqueFrames(cacheKey: string) {
     if (!recordingFilename) return;
     setLoadingFrames(true);
     try {
