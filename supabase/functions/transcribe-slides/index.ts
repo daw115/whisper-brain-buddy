@@ -16,8 +16,8 @@ serve(async (req) => {
     const { meetingId, mode } = await req.json();
     if (!meetingId) throw new Error("meetingId is required");
 
-    // mode: "captions" | "unique-frames" | "aggregate" | "both"
-    const selectedMode = mode || "both";
+    // mode: "unique-frames" | "captions" | "aggregate"
+    const selectedMode = mode || "unique-frames";
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -100,7 +100,7 @@ serve(async (req) => {
       return data?.analysis_json ?? null;
     }
 
-    // Load and deduplicate frames — returns frame metadata + paths (NO AI call)
+    // Load and deduplicate frames
     async function loadUniqueFrames() {
       if (!meeting.recording_filename) throw { status: 400, message: "No recording filename" };
 
@@ -162,7 +162,7 @@ serve(async (req) => {
       return unique;
     }
 
-    // Load frames + build image parts for AI (captions OCR)
+    // Load frames + build image parts for AI
     async function loadFramesForAI(uniqueFrames: { path: string; timestamp: number }[]) {
       const frames: { base64: string; mimeType: string; timestamp: string }[] = [];
       for (const ff of uniqueFrames.slice(0, 25)) {
@@ -191,7 +191,7 @@ serve(async (req) => {
     const results: Record<string, any> = {};
 
     // ========== UNIQUE FRAMES (dedup, no AI) ==========
-    if (selectedMode === "unique-frames" || selectedMode === "both") {
+    if (selectedMode === "unique-frames") {
       console.log("Identifying unique frames...");
       const uniqueFrames = await loadUniqueFrames();
       const frameData = uniqueFrames.map(f => ({
@@ -203,13 +203,14 @@ serve(async (req) => {
       results.uniqueFrames = { frames: frameData, total_unique: frameData.length };
     }
 
-    // ========== CAPTIONS OCR (dialogi z paska na dole) ==========
-    if (selectedMode === "captions" || selectedMode === "both") {
-      console.log("Running CAPTIONS OCR...");
-      // Use already-loaded unique frames if available, otherwise load
+    // ========== CAPTIONS + SLIDE CONTENT OCR ==========
+    if (selectedMode === "captions") {
+      console.log("Running CAPTIONS + SLIDE CONTENT OCR...");
+      // Load unique frames
       let uniqueFrames: { path: string; timestamp: number }[];
-      if (results.uniqueFrames) {
-        uniqueFrames = results.uniqueFrames.frames.map((f: any) => ({ path: f.path, timestamp: f.timestamp }));
+      const savedFrames = await loadLatest("unique-frames") as any;
+      if (savedFrames?.frames) {
+        uniqueFrames = savedFrames.frames.map((f: any) => ({ path: f.path, timestamp: f.timestamp }));
       } else {
         uniqueFrames = await loadUniqueFrames();
       }
@@ -218,24 +219,25 @@ serve(async (req) => {
       const captionParts: any[] = [
         {
           type: "text",
-          text: `Jesteś ekspertem OCR do odczytu napisów/dialogów ze spotkań wideo.
+          text: `Jesteś ekspertem OCR do analizy klatek z nagrań spotkań wideo (Teams/Zoom).
 
-Poniżej ${frames.length} klatek z nagrania spotkania biznesowego (np. Teams, Zoom).
+Poniżej ${frames.length} klatek z nagrania spotkania biznesowego.
 
-## CO CZYTAĆ
-Na każdej klatce szukaj **napisów/subtitles/dialogów** — tekst w **dolnej części ekranu** na **czarnym lub ciemnym tle** (live captions, napisy automatyczne).
+## ZADANIE 1: DIALOGI (napisy/live captions)
+Na każdej klatce szukaj **napisów/subtitles** — tekst w **dolnej części ekranu** na **czarnym/ciemnym tle** (live captions).
+- Odczytaj tekst z paska napisów
+- Zidentyfikuj mówcę (jeśli widoczne imię/nazwa)
+- Połącz fragmenty w spójne zdania
+- Pomiń duplikaty
 
-⚠️ IGNORUJ treść slajdów/prezentacji w głównej części ekranu.
-⚠️ Jeśli na klatce NIE MA napisów na dole — pomiń ją.
-
-## ZADANIE
-1. Odczytaj tekst z paska napisów na dole ekranu
-2. Zidentyfikuj mówcę (jeśli widoczne imię/nazwa)
-3. Połącz fragmenty z kolejnych klatek w spójne zdania
-4. Pomiń duplikaty
+## ZADANIE 2: TREŚĆ SLAJDÓW/PREZENTACJI
+Dla każdej klatki przeanalizuj **główną część ekranu** (prezentację/slajd):
+- Odczytaj tytuł slajdu
+- Opisz PEŁNĄ treść: bullet pointy, dane liczbowe, wykresy, tabele, diagramy
+- Zanotuj co się zmieniło vs poprzednia klatka (nowy slajd? ta sama treść?)
 
 ## FORMAT
-[MM:SS] Mówca: "Pełne zdanie"
+Zwróć ZARÓWNO dialogi jak i opisy slajdów.
 
 Poniżej klatki:`,
         },
@@ -245,8 +247,8 @@ Poniżej klatki:`,
       const captionResult = await callAI(captionParts, [{
         type: "function",
         function: {
-          name: "save_captions",
-          description: "Save extracted captions/dialogues from video frames",
+          name: "save_ocr_results",
+          description: "Save extracted captions/dialogues AND slide content descriptions",
           parameters: {
             type: "object",
             properties: {
@@ -263,25 +265,46 @@ Poniżej klatki:`,
                   required: ["timestamp", "speaker", "text"],
                   additionalProperties: false,
                 },
+                description: "Dialogi z paska live captions na dole ekranu.",
               },
               total_entries: { type: "number" },
+              slide_descriptions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    timestamp: { type: "string", description: "Timestamp klatki MM:SS" },
+                    slide_title: { type: "string", description: "Tytuł slajdu" },
+                    slide_content: { type: "string", description: "Pełna treść slajdu: bullet pointy, dane, tabele" },
+                    is_new_slide: { type: "boolean", description: "Czy to nowy slajd vs poprzedni" },
+                  },
+                  required: ["timestamp", "slide_title", "slide_content", "is_new_slide"],
+                  additionalProperties: false,
+                },
+                description: "Opisy treści slajdów/prezentacji z głównej części ekranu.",
+              },
+              speakers_identified: {
+                type: "array",
+                items: { type: "string" },
+                description: "Lista zidentyfikowanych mówców (pełne imiona z live captions).",
+              },
             },
-            required: ["transcript", "entries", "total_entries"],
+            required: ["transcript", "entries", "total_entries", "slide_descriptions", "speakers_identified"],
             additionalProperties: false,
           },
         },
-      }], { type: "function", function: { name: "save_captions" } });
+      }], { type: "function", function: { name: "save_ocr_results" } });
 
-      console.log(`Captions: ${captionResult.total_entries} entries, ${captionResult.transcript?.length ?? 0} chars`);
+      console.log(`OCR: ${captionResult.total_entries} dialog entries, ${captionResult.slide_descriptions?.length ?? 0} slide descriptions`);
       await saveAnalysis("captions-ocr", captionResult);
       results.captions = captionResult;
     }
 
-    // ========== AGGREGATION (captions + audio, NO slide OCR) ==========
-    if (selectedMode === "aggregate" || selectedMode === "both") {
+    // ========== AGGREGATION (captions + audio) ==========
+    if (selectedMode === "aggregate") {
       console.log("Running AGGREGATION...");
 
-      const captionSource = results.captions ?? await loadLatest("captions-ocr");
+      const captionSource = await loadLatest("captions-ocr") as any;
       if (!captionSource) {
         throw { status: 400, message: "Missing captions — run captions OCR first" };
       }
@@ -297,7 +320,16 @@ Poniżej klatki:`,
         ? transcriptLines.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
         : null;
 
-      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz 2 źródła danych z tego samego spotkania:
+      // Build slide descriptions text
+      const slideDescs = captionSource.slide_descriptions as any[] | undefined;
+      const slideDescText = slideDescs && slideDescs.length > 0
+        ? slideDescs
+            .filter((s: any) => s.is_new_slide !== false)
+            .map((s: any) => `[${s.timestamp}] 📊 ${s.slide_title}: ${s.slide_content}`)
+            .join("\n")
+        : null;
+
+      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz dane z tego samego spotkania:
 
 ## ŹRÓDŁO 1: DIALOGI Z NAPISÓW (OCR z paska na dole ekranu — live captions)
 ${captionSource.transcript || "Brak"}
@@ -305,16 +337,21 @@ ${captionSource.transcript || "Brak"}
 ${audioTranscript ? `## ŹRÓDŁO 2: TRANSKRYPT AUDIO (Web Speech API / Whisper)
 ${audioTranscript.slice(0, 15000)}` : "## ŹRÓDŁO 2: Brak transkryptu audio"}
 
+${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (OCR z prezentacji)
+${slideDescText}` : ""}
+
 ## ZADANIE
-Stwórz JEDNĄ zagregowaną transkrypcję chronologiczną łączącą oba źródła:
+Stwórz JEDNĄ zagregowaną transkrypcję chronologiczną:
 
-1. **Dialogi** — użyj napisów OCR jako bazy (są dokładniejsze — mają nazwy mówców)
+1. **Dialogi** — użyj napisów OCR jako bazy (mają nazwy mówców)
 2. **Audio** — uzupełnij/popraw z transkryptu audio (jeśli jest)
-3. **Mówcy** — zidentyfikuj pełne imiona mówców z live captions
-4. **Korekta** — popraw ewidentne błędy OCR korzystając z kontekstu audio
+3. **Slajdy** — wstaw znaczniki 📊 w odpowiednich momentach wskazując jaki slajd był wyświetlany
+4. **Mówcy** — zidentyfikuj pełne imiona
+5. **Korekta** — popraw błędy OCR korzystając z kontekstu
 
-Format:
-[MM:SS] Mówca: wypowiedź`;
+Format zagregowanej transkrypcji:
+[MM:SS] Mówca: wypowiedź
+[MM:SS] 📊 SLAJD: "Tytuł slajdu" — krótki opis treści`;
 
       const aggregateResult = await callAI(
         [{ type: "text", text: aggregatePrompt }],
@@ -322,13 +359,13 @@ Format:
           type: "function",
           function: {
             name: "save_aggregated_transcript",
-            description: "Save the aggregated transcript combining captions and audio",
+            description: "Save the aggregated transcript combining captions, audio and slide markers",
             parameters: {
               type: "object",
               properties: {
                 integrated_transcript: {
                   type: "string",
-                  description: "Pełna zagregowana transkrypcja łącząca dialogi i audio chronologicznie.",
+                  description: "Pełna zagregowana transkrypcja z dialogami i znacznikami slajdów chronologicznie.",
                 },
                 summary: {
                   type: "string",
@@ -339,8 +376,22 @@ Format:
                   items: { type: "string" },
                   description: "Lista zidentyfikowanych mówców (pełne imiona).",
                 },
+                slide_markers: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      timestamp: { type: "string" },
+                      slide_title: { type: "string" },
+                      slide_summary: { type: "string" },
+                    },
+                    required: ["timestamp", "slide_title", "slide_summary"],
+                    additionalProperties: false,
+                  },
+                  description: "Lista slajdów z ich pozycjami w chronologii spotkania.",
+                },
               },
-              required: ["integrated_transcript", "summary"],
+              required: ["integrated_transcript", "summary", "speakers", "slide_markers"],
               additionalProperties: false,
             },
           },
@@ -348,7 +399,7 @@ Format:
         { type: "function", function: { name: "save_aggregated_transcript" } },
       );
 
-      console.log(`Aggregated: ${aggregateResult.integrated_transcript?.length ?? 0} chars`);
+      console.log(`Aggregated: ${aggregateResult.integrated_transcript?.length ?? 0} chars, ${aggregateResult.slide_markers?.length ?? 0} slide markers`);
       await saveAnalysis("merged", aggregateResult);
       results.aggregated = aggregateResult;
     }
