@@ -121,7 +121,21 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
-  if (loading) {
+  async function handleDeleteAll() {
+    if (!confirm(`Usunąć wszystkie ${segments.length} segmentów?`)) return;
+    try {
+      const paths = segments.map((s) => s.path);
+      const { error } = await supabase.storage.from("recordings").remove(paths);
+      if (error) throw error;
+      toast.success(`Usunięto ${segments.length} segmentów`);
+      setSegments([]);
+      setPlayingIdx(null);
+      setExpandedFrames(null);
+    } catch (err: any) {
+      toast.error("Błąd usuwania: " + (err.message || "nieznany"));
+    }
+  }
+
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
         <Loader2 className="w-3 h-3 animate-spin" />
