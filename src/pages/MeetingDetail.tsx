@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Brain, FolderOpen } from "lucide-react";
-import { useMeeting, useCategories } from "@/hooks/use-meetings";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Brain, FolderOpen, Pencil, Trash2, Check, X } from "lucide-react";
+import { useMeeting, useCategories, useUpdateMeeting, useDeleteMeeting } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import TranscriptView from "@/components/TranscriptView";
@@ -25,25 +25,50 @@ export default function MeetingDetail() {
   const navigate = useNavigate();
   const { data: meeting, isLoading } = useMeeting(id);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
-  
   const [showChat, setShowChat] = useState(false);
   const [framesVersion, setFramesVersion] = useState(0);
   const [segmentsVersion, setSegmentsVersion] = useState(0);
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
+  const updateMeeting = useUpdateMeeting();
+  const deleteMeeting = useDeleteMeeting();
+
+  // Editable title state
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+
+  // Editable date state
+  const [editingDate, setEditingDate] = useState(false);
+  const [dateDraft, setDateDraft] = useState("");
+
+  const handleSaveTitle = () => {
+    if (!titleDraft.trim() || !id) return;
+    updateMeeting.mutate({ id, title: titleDraft.trim() });
+    setEditingTitle(false);
+  };
+
+  const handleSaveDate = () => {
+    if (!dateDraft || !id) return;
+    updateMeeting.mutate({ id, date: dateDraft });
+    setEditingDate(false);
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    if (!confirm("Usunąć to spotkanie? Tej operacji nie można cofnąć.")) return;
+    deleteMeeting.mutate(id, {
+      onSuccess: () => {
+        toast.success("Spotkanie usunięte");
+        navigate("/");
+      },
+      onError: () => toast.error("Nie udało się usunąć spotkania"),
+    });
+  };
 
   const updateCategory = async (categoryId: string | null) => {
-    const { error } = await supabase
-      .from("meetings")
-      .update({ category_id: categoryId })
-      .eq("id", id!);
-    if (error) {
-      toast.error("Nie udało się zmienić kategorii");
-    } else {
-      toast.success("Kategoria zmieniona");
-      queryClient.invalidateQueries({ queryKey: ["meeting", id] });
-      queryClient.invalidateQueries({ queryKey: ["meetings"] });
-    }
+    if (!id) return;
+    updateMeeting.mutate({ id, category_id: categoryId });
+    toast.success("Kategoria zmieniona");
   };
 
   // Load analyses from meeting_analyses table
@@ -72,7 +97,6 @@ export default function MeetingDetail() {
       if (data?.signedUrl) {
         setRecordingUrl(data.signedUrl);
       } else {
-        // Base file may not exist if recording was auto-split; try _part1
         const stem = meeting.recording_filename.replace(/\.[^.]+$/, "").replace(/_part\d+$/, "");
         const ext = meeting.recording_filename.match(/\.[^.]+$/)?.[0] || ".webm";
         const fallbackPath = `${user.id}/${stem}_part1${ext}`;
@@ -105,19 +129,50 @@ export default function MeetingDetail() {
 
   return (
     <div className="p-8 max-w-7xl">
-      <button
-        onClick={() => navigate("/")}
-        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors press-effect"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Dashboard
-      </button>
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors press-effect"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Dashboard
+        </button>
+        <button
+          onClick={handleDelete}
+          className="flex items-center gap-1.5 text-xs text-destructive hover:text-destructive/80 transition-colors press-effect"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Usuń
+        </button>
+      </div>
 
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-semibold text-foreground">{meeting.title}</h1>
+        {editingTitle ? (
+          <div className="flex items-center gap-2 flex-1 mr-4">
+            <input
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveTitle()}
+              className="text-2xl font-semibold text-foreground bg-transparent border-b-2 border-primary focus:outline-none flex-1"
+              autoFocus
+            />
+            <button onClick={handleSaveTitle} className="p-1 text-primary hover:text-primary/80"><Check className="w-4 h-4" /></button>
+            <button onClick={() => setEditingTitle(false)} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 group">
+            <h1 className="text-2xl font-semibold text-foreground">{meeting.title}</h1>
+            <button
+              onClick={() => { setTitleDraft(meeting.title); setEditingTitle(true); }}
+              className="p-1 text-muted-foreground/40 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         <button
           onClick={() => setShowChat(!showChat)}
-          className={`flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md border transition-colors press-effect ${
+          className={`flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md border transition-colors press-effect shrink-0 ${
             showChat
               ? "bg-primary/10 border-primary/30 text-primary"
               : "border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/50"
@@ -129,7 +184,31 @@ export default function MeetingDetail() {
       </div>
 
       <div className="flex flex-wrap items-center gap-5 text-sm text-muted-foreground font-mono-data mb-8">
-        <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />{meeting.date}</span>
+        {/* Editable date */}
+        {editingDate ? (
+          <span className="flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5" />
+            <input
+              type="datetime-local"
+              value={dateDraft}
+              onChange={(e) => setDateDraft(e.target.value)}
+              className="bg-transparent border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-primary/50"
+            />
+            <button onClick={handleSaveDate} className="p-0.5 text-primary hover:text-primary/80"><Check className="w-3 h-3" /></button>
+            <button onClick={() => setEditingDate(false)} className="p-0.5 text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
+          </span>
+        ) : (
+          <span
+            className="flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors"
+            onClick={() => {
+              setDateDraft(meeting.date + "T12:00");
+              setEditingDate(true);
+            }}
+          >
+            <Calendar className="w-3.5 h-3.5" />{meeting.date}
+            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100" />
+          </span>
+        )}
         {meeting.duration && (
           <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{meeting.duration}</span>
         )}
@@ -192,19 +271,7 @@ export default function MeetingDetail() {
                 recordingSizeBytes={meeting.recording_size_bytes}
               />
 
-              {/* AI Transcription */}
-              {recordingUrl && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <TranscribeButton
-                    meetingId={meeting.id}
-                    recordingUrl={recordingUrl}
-                    recordingFilename={meeting.recording_filename}
-                    onComplete={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
-                  />
-                </div>
-              )}
-
-              {/* Audio extraction & splitting */}
+              {/* Audio extraction & splitting — works with segments via RecordingSegments */}
               {recordingUrl && (
                 <div className="mt-3 pt-3 border-t border-border">
                   <AudioExtractor
@@ -218,30 +285,7 @@ export default function MeetingDetail() {
                 </div>
               )}
 
-              {/* Frame regeneration */}
-              {recordingUrl && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <FrameRegenerator
-                    recordingUrl={recordingUrl}
-                    recordingFilename={meeting.recording_filename}
-                    onComplete={() => setFramesVersion((v) => v + 1)}
-                  />
-                </div>
-              )}
-
-              {/* Recording splitter */}
-              {recordingUrl && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <RecordingSplitter
-                    recordingUrl={recordingUrl}
-                    recordingFilename={meeting.recording_filename}
-                    recordingSizeBytes={meeting.recording_size_bytes}
-                    onComplete={() => setSegmentsVersion((v) => v + 1)}
-                  />
-                </div>
-              )}
-
-              {/* Segments viewer (batch processing) */}
+              {/* Segments viewer (batch processing: frames + transcription per segment) */}
               <div className="mt-3 pt-3 border-t border-border">
                 <RecordingSegments
                   key={segmentsVersion}
@@ -295,7 +339,7 @@ export default function MeetingDetail() {
             {meeting.transcript_lines && meeting.transcript_lines.length > 0 && (
               <button
                 onClick={async () => {
-                  if (!confirm(`Usunąć ${meeting.transcript_lines.length} linii transkryptu?`)) return;
+                  if (!confirm(`Usunąć ${meeting.transcript_lines!.length} linii transkryptu?`)) return;
                   const { error } = await supabase.from("transcript_lines").delete().eq("meeting_id", meeting.id);
                   if (error) {
                     toast.error("Błąd usuwania: " + error.message);

@@ -71,7 +71,7 @@ export function useMeetings() {
       const { data, error } = await supabase
         .from("meetings")
         .select("*, meeting_participants(*), action_items(*), decisions(*), categories:category_id(*)")
-        .order("date", { ascending: false });
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return data as MeetingWithRelations[];
     },
@@ -169,6 +169,39 @@ export function useCreateMeeting() {
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["meetings"] }),
+  });
+}
+
+export function useUpdateMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...fields }: { id: string; title?: string; date?: string; category_id?: string | null }) => {
+      const { error } = await supabase
+        .from("meetings")
+        .update(fields)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["meeting", vars.id] });
+      qc.invalidateQueries({ queryKey: ["meetings"] });
+    },
+  });
+}
+
+export function useDeleteMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("meetings")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["meetings"] });
+    },
   });
 }
 
