@@ -225,6 +225,18 @@ export default function MeetingDetail() {
                 </p>
               )}
 
+              {/* AI Transcription */}
+              {recordingUrl && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <TranscribeButton
+                    meetingId={meeting.id}
+                    recordingUrl={recordingUrl}
+                    recordingFilename={meeting.recording_filename}
+                    onComplete={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
+                  />
+                </div>
+              )}
+
               {/* Frame regeneration */}
               {recordingUrl && (
                 <div className="mt-3 pt-3 border-t border-border">
