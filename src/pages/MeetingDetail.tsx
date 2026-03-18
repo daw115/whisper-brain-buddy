@@ -371,51 +371,23 @@ export default function MeetingDetail() {
           </div>
         </div>
 
-        {/* Center: Transcript */}
+        {/* Center: Transcript Tabs */}
         <div className="col-span-5 bg-card p-5 border-l border-r border-border">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">Transcript</h2>
-            {meeting.transcript_lines && meeting.transcript_lines.length > 0 && (
-              <button
-                onClick={async () => {
-                  if (!confirm(`Usunąć ${meeting.transcript_lines!.length} linii transkryptu?`)) return;
-                  const { error } = await supabase.from("transcript_lines").delete().eq("meeting_id", meeting.id);
-                  if (error) {
-                    toast.error("Błąd usuwania: " + error.message);
-                  } else {
-                    toast.success("Transkrypt wyczyszczony");
-                    queryClient.invalidateQueries({ queryKey: ["meeting", id] });
-                  }
-                }}
-                className="text-[10px] text-destructive hover:text-destructive/80 transition-colors"
-              >
-                Wyczyść
-              </button>
-            )}
-          </div>
-          {meeting.transcript_lines && meeting.transcript_lines.length > 0 ? (
-            <TranscriptView lines={meeting.transcript_lines} meetingTitle={meeting.title} />
-          ) : (
-            <p className="text-sm text-muted-foreground italic">No transcript available.</p>
-          )}
-
-          {/* Slide Insights from AI analysis */}
-          {analyses.length > 0 && (
-            <div className="mt-6 pt-4 border-t border-border">
-              <SlideInsightsPanel analyses={analyses} />
-            </div>
-          )}
-
-          {/* AI Input Preview */}
-          <div className="mt-6 pt-4 border-t border-border">
-            <AIInputPreview
-              meetingId={meeting.id}
-              meetingTitle={meeting.title}
-              transcriptLines={meeting.transcript_lines || []}
-              recordingFilename={meeting.recording_filename}
-              framesVersion={framesVersion}
-            />
-          </div>
+          <TranscriptTabs
+            meeting={meeting}
+            analyses={analyses}
+            framesVersion={framesVersion}
+            onDeleteTranscript={async () => {
+              if (!confirm(`Usunąć ${meeting.transcript_lines!.length} linii transkryptu?`)) return;
+              const { error } = await supabase.from("transcript_lines").delete().eq("meeting_id", meeting.id);
+              if (error) {
+                toast.error("Błąd usuwania: " + error.message);
+              } else {
+                toast.success("Transkrypt wyczyszczony");
+                queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+              }
+            }}
+          />
         </div>
 
         {/* Right: Action Items + Participants + Analysis Comparison */}
