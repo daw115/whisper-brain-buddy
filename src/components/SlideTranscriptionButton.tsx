@@ -40,15 +40,47 @@ const stepConfig: Record<Exclude<Step, "idle">, { label: string; description: st
   },
 };
 
-// Hash raw JPEG bytes for dedup (no image decoding needed)
-function hashBytes(bytes: Uint8Array): string {
-  let hash = 0;
-  const start = Math.min(500, bytes.length);
-  const end = Math.min(bytes.length, 8000);
-  for (let i = start; i < end; i += 3) {
-    hash = ((hash << 5) - hash + bytes[i]) | 0;
-  }
-  return hash.toString(36);
+// Crop presentation area from Teams layout and hash pixel data for dedup
+// Teams layout: presentation ~15-55% width, ~12-72% height (left side, excluding title bar & captions bar)
+const CROP_REGION = { xPct: 0.13, yPct: 0.12, wPct: 0.42, hPct: 0.60 };
+
+function hashCroppedSlide(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const { xPct, yPct, wPct, hPct } = CROP_REGION;
+      const sx = Math.round(img.width * xPct);
+      const sy = Math.round(img.height * yPct);
+      const sw = Math.round(img.width * wPct);
+      const sh = Math.round(img.height * hPct);
+
+      // Draw cropped region to small canvas for fast hashing
+      const scale = 64 / Math.max(sw, sh); // downscale to ~64px for speed
+      const cw = Math.round(sw * scale);
+      const ch = Math.round(sh * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+
+      const pixels = ctx.getImageData(0, 0, cw, ch).data;
+      // DJB2 hash over downscaled pixel data (R,G,B channels, skip alpha)
+      let hash = 5381;
+      for (let i = 0; i < pixels.length; i += 16) { // sample every 4th pixel
+        hash = ((hash << 5) + hash + pixels[i]) | 0;     // R
+        hash = ((hash << 5) + hash + pixels[i + 1]) | 0;  // G
+        hash = ((hash << 5) + hash + pixels[i + 2]) | 0;  // B
+      }
+      URL.revokeObjectURL(img.src);
+      resolve(hash.toString(36));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src);
+      reject(new Error("Failed to decode image"));
+    };
+    img.src = URL.createObjectURL(blob);
+  });
 }
 
 function formatTs(seconds: number): string {
@@ -161,8 +193,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
           .download(frame.path);
         if (!blob) continue;
 
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        const frameHash = hashBytes(bytes);
+        const frameHash = await hashCroppedSlide(blob);
         const tsFormatted = formatTs(frame.timestamp);
 
         if (!seenHashes.has(frameHash)) {
