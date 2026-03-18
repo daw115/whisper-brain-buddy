@@ -163,10 +163,16 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
     setTranscribePhase("converting");
 
     try {
-      toast.loading(`Transkrypcja segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+      toast.loading(`Pobieranie segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
-      const { fetchFile } = await import("@ffmpeg/util");
+      // Download segment as raw bytes
+      const response = await fetch(seg.signedUrl);
+      if (!response.ok) throw new Error(`Błąd pobierania: ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const inputBytes = new Uint8Array(arrayBuffer);
       
+      toast.loading(`Konwersja audio segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+
       // Create a fresh FFmpeg instance to avoid FS conflicts
       const { FFmpeg } = await import("@ffmpeg/ffmpeg");
       const ffmpeg = new FFmpeg();
@@ -176,14 +182,13 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
         wasmURL: `${baseURL}/ffmpeg-core.wasm`,
       });
 
-      const videoData = await fetchFile(seg.signedUrl);
-      await ffmpeg.writeFile("tr_input.webm", videoData);
+      await ffmpeg.writeFile("input.webm", inputBytes);
 
-      await ffmpeg.exec(["-i", "tr_input.webm", "-vn", "-ar", "16000", "-ac", "1", "-f", "f32le", "tr_output.pcm"]);
+      await ffmpeg.exec(["-i", "input.webm", "-vn", "-ar", "16000", "-ac", "1", "-f", "f32le", "output.pcm"]);
 
-      const pcmData = await ffmpeg.readFile("tr_output.pcm") as Uint8Array;
-      await ffmpeg.deleteFile("tr_input.webm");
-      await ffmpeg.deleteFile("tr_output.pcm");
+      const pcmData = await ffmpeg.readFile("output.pcm") as Uint8Array;
+      
+      // Terminate FFmpeg before doing anything else
       ffmpeg.terminate();
 
       const audioData = new Float32Array(pcmData.buffer);
