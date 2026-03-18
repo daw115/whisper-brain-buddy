@@ -3,6 +3,8 @@
  * Uses an offscreen <video> + <canvas> to capture screenshots of slides.
  */
 
+import { resolveLoadedVideoDuration, seekVideo } from "@/lib/video-duration";
+
 export interface ExtractedFrame {
   timestamp: number; // seconds
   blob: Blob;
@@ -42,7 +44,7 @@ export async function extractFrames(
 
     onProgress?.({ phase: "loading", current: 1, total: 1, percent: 100 });
 
-    const duration = await resolveVideoDuration(video, signal);
+    const duration = await resolveLoadedVideoDuration(video, signal);
     if (!duration || !isFinite(duration)) return [];
 
     const timestamps = buildTimestamps(duration, intervalSeconds, maxFrames);
@@ -105,52 +107,20 @@ export async function extractFrames(
 
 async function waitForMetadata(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      reject(new Error("Video load timeout"));
-    }, 30_000);
-
-    const onAbort = () => {
-      cleanup();
-      reject(new DOMException("Anulowano", "AbortError"));
-    };
-
-    const onLoaded = () => {
-      cleanup();
-      resolve();
-    };
-
-    const onError = () => {
-      cleanup();
-      reject(new Error("Failed to load video"));
-    };
-
+    const timeout = window.setTimeout(() => { cleanup(); reject(new Error("Video load timeout")); }, 30_000);
+    const onAbort = () => { cleanup(); reject(new DOMException("Anulowano", "AbortError")); };
+    const onLoaded = () => { cleanup(); resolve(); };
+    const onError = () => { cleanup(); reject(new Error("Failed to load video")); };
     const cleanup = () => {
       window.clearTimeout(timeout);
       video.removeEventListener("loadedmetadata", onLoaded);
       video.removeEventListener("error", onError);
       signal?.removeEventListener("abort", onAbort);
     };
-
     video.addEventListener("loadedmetadata", onLoaded, { once: true });
     video.addEventListener("error", onError, { once: true });
     signal?.addEventListener("abort", onAbort, { once: true });
   });
-}
-
-async function resolveVideoDuration(video: HTMLVideoElement, signal?: AbortSignal): Promise<number | null> {
-  if (isFinite(video.duration) && video.duration > 0) return video.duration;
-
-  try {
-    await seekVideo(video, Number.MAX_SAFE_INTEGER, signal, 5_000);
-    const fixedDuration = video.duration;
-    await seekVideo(video, 0, signal, 3_000).catch(() => undefined);
-    if (isFinite(fixedDuration) && fixedDuration > 0) return fixedDuration;
-  } catch {
-    // ignore and fall back below
-  }
-
-  return null;
 }
 
 function buildTimestamps(duration: number, intervalSeconds: number, maxFrames: number): number[] {
@@ -182,51 +152,6 @@ function buildTimestamps(duration: number, intervalSeconds: number, maxFrames: n
   }
 
   return timestamps.sort((a, b) => a - b).slice(0, maxFrames);
-}
-
-async function seekVideo(
-  video: HTMLVideoElement,
-  time: number,
-  signal?: AbortSignal,
-  timeoutMs = 4_000,
-): Promise<void> {
-  if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
-
-  const targetTime = Math.max(0, Number.isFinite(time) ? time : 0);
-
-  await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      resolve();
-    }, timeoutMs);
-
-    const onAbort = () => {
-      cleanup();
-      reject(new DOMException("Anulowano", "AbortError"));
-    };
-
-    const onSeeked = () => {
-      cleanup();
-      resolve();
-    };
-
-    const onError = () => {
-      cleanup();
-      reject(new Error("Błąd przewijania wideo"));
-    };
-
-    const cleanup = () => {
-      window.clearTimeout(timeout);
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-    };
-
-    video.addEventListener("seeked", onSeeked, { once: true });
-    video.addEventListener("error", onError, { once: true });
-    signal?.addEventListener("abort", onAbort, { once: true });
-    video.currentTime = targetTime;
-  });
 }
 
 function quickHash(data: Uint8ClampedArray): string {
