@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Download, Copy, Check, ImageIcon, Loader2, FileText, Music, Package, Archive } from "lucide-react";
+import { Download, Copy, Check, ImageIcon, Loader2, FileText, Package, Archive } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { MeetingWithRelations } from "@/hooks/use-meetings";
 import { toast } from "sonner";
@@ -30,9 +30,6 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [convertingMp3, setConvertingMp3] = useState(false);
-  const [mp3Url, setMp3Url] = useState<string | null>(null);
-  const [mp3Size, setMp3Size] = useState<string | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
   const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
   const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
@@ -185,68 +182,53 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   }, [frames, geminiSlides]);
 
   function buildPrompt(): string {
-    const transcriptLines = meeting.transcript_lines || [];
-    const hasTranscript = transcriptLines.length > 0;
     const hasIntegrated = !!integratedTranscript;
 
-    const transcriptSection = hasIntegrated
-      ? `ZAGREGOWANA TRANSKRYPCJA (audio + slajdy, chronologicznie):
+    return `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
+
+## DANE WEJŚCIOWE
+${hasIntegrated ? "- Zagregowana transkrypcja chronologiczna (dialogi uczestników + treść slajdów, połączone przez AI)" : "- Brak zagregowanej transkrypcji — przeanalizuj załączone materiały"}
+${selectedFrames.length > 0 ? `- ${selectedFrames.length} obrazów slajdów prezentacji (wybrane unikalne slajdy)` : ""}
+
+${hasIntegrated ? `## ZAGREGOWANA TRANSKRYPCJA
+Poniższa transkrypcja łączy dialogi uczestników (odczytane z napisów na dole ekranu) z treścią slajdów (📊 SLAJD:) w kolejności chronologicznej. Została już zagregowana przez AI — traktuj ją jako wiarygodne źródło.
+
 ---
-${integratedTranscript!.slice(0, 20000)}
----
-Powyższa transkrypcja łączy dialog uczestników z treścią slajdów (oznaczonych 📊 SLAJD:).
-Została już zweryfikowana i skorygowana — traktuj ją jako główne źródło danych.`
-      : hasTranscript
-      ? `TRANSKRYPT AUDIO:
----
-${transcriptLines
-  .sort((a, b) => a.line_order - b.line_order)
-  .map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`)
-  .join("\n")
-  .slice(0, 15000)}
----`
-      : `TRANSKRYPT: Brak automatycznego transkryptu.
-WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
+${integratedTranscript!.slice(0, 25000)}
+---` : ""}
 
-    const frameSection = selectedFrames.length > 0
-      ? `\nZAŁĄCZONE OBRAZY: ${selectedFrames.length} wybranych slajdów prezentacji (wyselekcjonowane przez AI).
-Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
-Powiąż treść slajdów z dialogiem w transkrypcji.`
-      : "";
+${selectedFrames.length > 0 ? `## ZAŁĄCZONE OBRAZY SLAJDÓW
+W archiwum ZIP znajduje się ${selectedFrames.length} obrazów slajdów prezentacji.
+Dla KAŻDEGO slajdu:
+1. Odczytaj CAŁĄ treść: tytuły, bullet pointy, dane liczbowe, wykresy, tabele
+2. Zweryfikuj dane z transkrypcji — wyłap szczegóły nieujęte w tekście
+3. Powiąż treść slajdu z odpowiednim momentem dialogu` : ""}
 
-    return `Przeanalizuj spotkanie biznesowe i zwróć wynik w formacie JSON.
+## ZADANIA
+1. Przeanalizuj przebieg spotkania na podstawie transkrypcji i slajdów
+2. Dla KAŻDEGO slajdu: opisz treść, kontekst dyskusji, wnioski
+3. Wyciągnij decyzje, zadania i podsumowanie
+4. Zidentyfikuj rozbieżności między slajdami a dialogiem
+5. Wyłap kontekst ukryty — informacje z dialogu których NIE MA na slajdach
 
-DANE WEJŚCIOWE:
-${hasIntegrated ? "- Zagregowana transkrypcja (dialog + slajdy w jednym dokumencie chronologicznym)" : ""}
-${!hasIntegrated && hasTranscript ? `- Transkrypt audio: ${transcriptLines.length} linii` : ""}
-${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
-${selectedFrames.length > 0 ? `- ${selectedFrames.length} wyselekcjonowanych slajdów prezentacji (wgrane jako obrazy)` : ""}
-
-${transcriptSection}
-${frameSection}
-
-ZADANIA:
-1. Na podstawie transkrypcji${hasIntegrated ? " (która już łączy dialog z treścią slajdów)" : ""} przeanalizuj przebieg spotkania
-${selectedFrames.length > 0 ? "2. Przeanalizuj załączone obrazy slajdów — zweryfikuj dane, odczytaj wykresy/tabele, wyłap szczegóły niejęte w transkrypcji" : ""}
-${selectedFrames.length > 0 ? "3. Dla KAŻDEGO slajdu opisz: co zawiera, co mówiono w kontekście, jakie decyzje/wnioski wynikły" : ""}
-- Wyciągnij decyzje, zadania i podsumowanie
-
-SZCZEGÓLNY NACISK NA:
+## SZCZEGÓLNY NACISK NA
 - **Analiza slajdów**: Każdy slajd = osobny insight z pełną treścią + kontekstem dialogu
-- **Dane liczbowe**: Wyciągnij WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
+- **Dane liczbowe**: WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
 - **Rozbieżności**: Co mówiono innego niż jest na slajdach
-- **Kontekst ukryty**: Informacje z dialogu których NIE MA na slajdach (decyzje ustne, komentarze)
+- **Kontekst ukryty**: Decyzje ustne, komentarze, background niewidoczny na slajdach
 
+## FORMAT WYNIKU
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
-  "summary": "Zwięzłe podsumowanie spotkania w 3-5 zdaniach po polsku, z kluczowymi danymi liczbowymi",
+  "summary": "Kompletne podsumowanie 3-6 zdań po polsku. Główny temat, kluczowe ustalenia, dane liczbowe, wnioski i następne kroki.",
+  "integrated_transcript": "ZINTEGROWANY chronologiczny zapis spotkania. Format: [MM:SS] Mówca: tekst... oraz 📊 SLAJD: treść slajdu wstawiona w odpowiednie miejsca dialogu.",
   "sentiment": "pozytywny | neutralny | negatywny | mieszany",
   "participants": ["Imię Nazwisko uczestnika 1", "Imię Nazwisko uczestnika 2"],
-  "key_quotes": ["Najważniejszy cytat — Autor"],
   "tags": ["temat1", "temat2"],
+  "key_quotes": ["Najważniejszy cytat — dokładne słowa uczestnika"],
   "action_items": [
     {
-      "task": "Opis zadania do wykonania",
+      "task": "Konkretne zadanie do wykonania",
       "owner": "Osoba odpowiedzialna",
       "deadline": "YYYY-MM-DD lub null"
     }
@@ -254,29 +236,30 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
   "decisions": [
     {
       "decision": "Podjęta decyzja",
-      "rationale": "Uzasadnienie lub null",
+      "rationale": "Uzasadnienie lub kontekst",
       "timestamp": "MM:SS lub null"
     }
-  ]${selectedFrames.length > 0 ? `,
+  ],
   "slide_insights": [
     {
       "slide_timestamp": "MM:SS",
-      "slide_title": "Tytuł slajdu",
-      "slide_content": "Pełna treść: tytuły, punkty, dane, wykresy",
-      "discussion_context": "Co mówili uczestnicy o tym slajdzie",
-      "extra_context": "Informacje z dialogu których NIE MA na slajdzie",
-      "discrepancies": "Rozbieżności między slajdem a tym co powiedziano (jeśli są)"
+      "slide_title": "Tytuł/nagłówek slajdu",
+      "slide_content": "Pełna treść ze slajdu: tytuły, punkty, dane, wykresy, tabele",
+      "discussion_context": "Co mówili uczestnicy o tym slajdzie — komentarze, pytania, wątpliwości",
+      "extra_context": "Informacje z dialogu których NIE MA na slajdzie (uwagi, decyzje ustne, background)",
+      "discrepancies": "Rozbieżności między slajdem a tym co powiedziano ustnie (jeśli są)"
     }
-  ]` : ""}
+  ]
 }
 
-ZASADY:
-1. Zidentyfikuj mówców po kontekście
+## ZASADY
+1. Zidentyfikuj mówców po kontekście — użyj pełnych imion
 2. Action items = konkretne zadania z właścicielem
-3. Decisions = wyraźnie podjęte decyzje
+3. Decisions = wyraźnie podjęte decyzje (nie domysły)
 4. Summary = zwięzłe, z danymi liczbowymi, po polsku
 5. Tags = główne tematy (max 7)
-${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!" : ""}`;
+6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu — to najważniejsza część!
+7. integrated_transcript = poprawiona/wzbogacona wersja transkrypcji z wstawionymi slajdami`;
   }
 
   function handleCopy() {
@@ -286,54 +269,8 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
     setTimeout(() => setCopied(false), 2000);
   }
 
-  async function handleConvertMp3() {
-    if (!recordingUrl) return;
-    setConvertingMp3(true);
 
-    try {
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile } = await import("@ffmpeg/util");
 
-      const ffmpeg = new FFmpeg();
-      await ffmpeg.load({
-        coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
-        wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
-      });
-
-      toast.info("Pobieranie nagrania…");
-      const videoData = await fetchFile(recordingUrl);
-      await ffmpeg.writeFile("input.webm", videoData);
-
-      toast.info("Konwersja do MP3… To może potrwać kilka minut.");
-      await ffmpeg.exec(["-i", "input.webm", "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", "output.mp3"]);
-
-      const rawData = await ffmpeg.readFile("output.mp3");
-      const blob = new Blob([rawData as any], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-      setMp3Url(url);
-      setMp3Size((blob.size / (1024 * 1024)).toFixed(1));
-
-      await ffmpeg.deleteFile("input.webm");
-      await ffmpeg.deleteFile("output.mp3");
-
-      toast.success(`MP3 gotowy: ${(blob.size / (1024 * 1024)).toFixed(1)} MB`);
-    } catch (err: any) {
-      console.error("FFmpeg error:", err);
-      toast.error("Błąd konwersji: " + (err.message || "nieznany"));
-    } finally {
-      setConvertingMp3(false);
-    }
-  }
-
-  function downloadMp3() {
-    if (!mp3Url) return;
-    const a = document.createElement("a");
-    a.href = mp3Url;
-    a.download = (meeting.recording_filename || "recording").replace(/\.[^.]+$/, ".mp3");
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
 
   async function handleDownloadZip() {
     setDownloading(true);
@@ -345,7 +282,12 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
       toast.info("Pakuję prompt…");
       zip.file("prompt.txt", buildPrompt());
 
-      // 2. Add selected frames (fetch as blob)
+      // 2. Add integrated transcript as separate file if available
+      if (integratedTranscript) {
+        zip.file("transkrypcja_zagregowana.txt", integratedTranscript);
+      }
+
+      // 3. Add selected slide images
       if (selectedFrames.length > 0) {
         toast.info(`Pakuję ${selectedFrames.length} slajdów…`);
         const slidesFolder = zip.folder("slajdy");
@@ -361,15 +303,6 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
             console.warn(`Failed to fetch frame ${i}:`, err);
           }
         }
-      }
-
-      // 3. Add MP3 if ready
-      if (mp3Url) {
-        toast.info("Pakuję MP3…");
-        const resp = await fetch(mp3Url);
-        const blob = await resp.blob();
-        const mp3Name = (meeting.recording_filename || "recording").replace(/\.[^.]+$/, ".mp3");
-        zip.file(mp3Name, blob);
       }
 
       // 4. Generate and download ZIP
@@ -403,9 +336,8 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
     );
   }
 
-  const transcriptLines = meeting.transcript_lines || [];
-  const hasTranscript = transcriptLines.length > 0;
   const hasGeminiFilter = geminiSlides.length > 0 && selectedFrames.length < frames.length;
+  const hasIntegrated = !!integratedTranscript;
 
   return (
     <div className="space-y-4">
@@ -418,7 +350,7 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
       {/* One-click ZIP download */}
       <button
         onClick={handleDownloadZip}
-        disabled={downloading || convertingMp3}
+        disabled={downloading}
         className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 press-effect"
       >
         {downloading ? (
@@ -431,94 +363,56 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
             <Archive className="w-4 h-4" />
             Pobierz ZIP ({[
               "prompt",
+              hasIntegrated ? "transkrypcja" : null,
               selectedFrames.length > 0 ? `${selectedFrames.length} slajdów` : null,
-              mp3Url ? "MP3" : null,
             ].filter(Boolean).join(" + ")})
           </>
         )}
       </button>
-      <p className="text-[10px] text-muted-foreground text-center">
-        Jeden plik ZIP: prompt.txt
-        {selectedFrames.length > 0 ? ` + ${selectedFrames.length} slajdów${hasGeminiFilter ? " (wybrane przez Gemini)" : ""}` : ""}
-        {mp3Url ? " + MP3" : ""}
-        {!mp3Url && recordingUrl ? " (skonwertuj MP3 poniżej aby dodać)" : ""}
-      </p>
+
+      {!hasIntegrated && !selectedFrames.length && (
+        <p className="text-[10px] text-muted-foreground/60 text-center">
+          ⚠ Najpierw uruchom OCR (dialogi + slajdy + agregacja) aby przygotować dane
+        </p>
+      )}
 
       {/* Model recommendation */}
       <div className="bg-primary/5 border border-primary/20 rounded-md p-3">
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          Rozpakuj ZIP i wgraj wszystkie pliki do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
+          Rozpakuj ZIP i wgraj <strong>wszystkie pliki</strong> do <strong>chat.openai.com</strong> → <strong>GPT-4o</strong>.
         </p>
       </div>
 
       {/* Data summary */}
       <div className="bg-muted/30 border border-border rounded-md p-3 space-y-1">
-        <p className="text-[11px] font-medium text-foreground">📊 Zawartość paczki:</p>
+        <p className="text-[11px] font-medium text-foreground">📦 Zawartość paczki:</p>
         <ul className="text-[10px] text-muted-foreground space-y-0.5">
-          {integratedTranscript && (
+          <li className="flex items-center gap-1">
+            <Check className="w-3 h-3 text-primary" />
+            prompt.txt — instrukcja analizy (identyczna jak Gemini)
+          </li>
+          {hasIntegrated && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              ✨ Zagregowana transkrypcja (audio + slajdy) — w prompcie
+              ✨ transkrypcja_zagregowana.txt — dialogi + slajdy chronologicznie
             </li>
           )}
-          {!integratedTranscript && hasTranscript && (
-            <li className="flex items-center gap-1">
-              <Check className="w-3 h-3 text-primary" />
-              Transkrypt audio: {transcriptLines.length} linii — w prompcie
-            </li>
-          )}
-          {!integratedTranscript && !hasTranscript && (
-            <li className="text-muted-foreground/60">✗ Brak transkryptu — wgraj MP3 do ChatGPT</li>
+          {!hasIntegrated && (
+            <li className="text-muted-foreground/60">✗ Brak zagregowanej transkrypcji — uruchom OCR</li>
           )}
           {selectedFrames.length > 0 && (
             <li className="flex items-center gap-1">
               <Check className="w-3 h-3 text-primary" />
-              {selectedFrames.length} slajdów
-              {hasGeminiFilter && ` (z ${frames.length} klatek — wybrane przez Gemini)`}
+              {selectedFrames.length} slajdów prezentacji
+              {hasGeminiFilter && ` (z ${frames.length} klatek)`}
             </li>
           )}
-          {mp3Url && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> MP3 ({mp3Size} MB)</li>}
-          {recordingUrl && !mp3Url && <li className="text-muted-foreground/60">⚠ MP3 nieskonwertowany — skonwertuj poniżej</li>}
+          {selectedFrames.length === 0 && (
+            <li className="text-muted-foreground/60">✗ Brak slajdów — uruchom OCR</li>
+          )}
         </ul>
       </div>
-
-      {/* MP3 conversion */}
-      {recordingUrl && (
-        <div className="border border-border rounded-md p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-              <Music className="w-3.5 h-3.5" />
-              Przygotuj MP3
-            </span>
-            {mp3Url && <Check className="w-3.5 h-3.5 text-primary" />}
-          </div>
-
-          {mp3Url ? (
-            <p className="text-[10px] text-primary flex items-center gap-1">
-              <Check className="w-3 h-3" /> MP3 gotowy ({mp3Size} MB) — zostanie dodany do ZIP
-            </p>
-          ) : (
-            <button
-              onClick={handleConvertMp3}
-              disabled={convertingMp3}
-              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-            >
-              {convertingMp3 ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Konwertuję…
-                </>
-              ) : (
-                <>
-                  <Music className="w-3.5 h-3.5" />
-                  Konwertuj nagranie do MP3
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Selected frames preview */}
       {selectedFrames.length > 0 && (
@@ -594,7 +488,7 @@ ${selectedFrames.length > 0 ? "6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEG
           <li>Kliknij <strong>Pobierz ZIP</strong> powyżej</li>
           <li>Rozpakuj archiwum</li>
           <li>Otwórz <strong>chat.openai.com</strong> → model <strong>GPT-4o</strong></li>
-          <li>Wgraj <strong>wszystkie pliki</strong> z rozpakowanego folderu</li>
+          <li>Wgraj <strong>wszystkie pliki</strong> z rozpakowanego folderu (prompt + transkrypcja + slajdy)</li>
           <li>Wyślij i poczekaj na wynik JSON</li>
           <li>Wklej JSON w sekcji <strong>"Importuj wynik analizy"</strong> poniżej</li>
         </ol>
