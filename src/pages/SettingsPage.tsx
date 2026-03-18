@@ -12,9 +12,21 @@ interface PinUser {
   created_at: string;
 }
 
+const CATEGORY_COLORS = [
+  { name: "Indigo", value: "#6366f1" },
+  { name: "Emerald", value: "#10b981" },
+  { name: "Amber", value: "#f59e0b" },
+  { name: "Rose", value: "#f43f5e" },
+  { name: "Cyan", value: "#06b6d4" },
+  { name: "Violet", value: "#8b5cf6" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Teal", value: "#14b8a6" },
+];
+
 interface Category {
   id: string;
   name: string;
+  color: string;
 }
 
 export default function SettingsPage() {
