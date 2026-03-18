@@ -926,7 +926,7 @@ export default function SegmentToolbox({
               <span className="font-mono-data">{batchProgress.percent}%</span>
             </div>
             <Progress value={batchProgress.percent} className="h-1.5" />
-            {phase === "batch-frames" && (
+            {(phase === "batch-frames" || phase === "splitting-video") && (
               <button onClick={() => abortRef.current?.abort()} className="text-[10px] text-destructive hover:text-destructive/80 flex items-center gap-1">
                 <X className="w-3 h-3" />Anuluj
               </button>
