@@ -26,6 +26,7 @@ export async function extractFrames(
   maxFrames = 30,
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
+  timestampOffset = 0,
 ): Promise<ExtractedFrame[]> {
   const url = URL.createObjectURL(videoBlob);
 
@@ -96,10 +97,74 @@ export async function extractFrames(
         );
       });
       const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-      frames.push({ timestamp: ts, blob, dataUrl });
+      frames.push({ timestamp: ts + timestampOffset, blob, dataUrl });
     }
 
     return frames;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Extract frames and also return the video duration for cumulative offset tracking */
+export async function extractFramesWithDuration(
+  videoBlob: Blob,
+  intervalSeconds = 30,
+  maxFrames = 30,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+  timestampOffset = 0,
+): Promise<{ frames: ExtractedFrame[]; durationSec: number }> {
+  const url = URL.createObjectURL(videoBlob);
+
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.playsInline = true;
+    video.src = url;
+
+    onProgress?.({ phase: "loading", current: 0, total: 1, percent: 0 });
+    await waitForMetadata(video, signal);
+    if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
+    onProgress?.({ phase: "loading", current: 1, total: 1, percent: 100 });
+
+    const duration = await resolveLoadedVideoDuration(video, signal);
+    if (!duration || !isFinite(duration)) return { frames: [], durationSec: 0 };
+
+    const timestamps = buildTimestamps(duration, intervalSeconds, maxFrames);
+    if (timestamps.length === 0) return { frames: [], durationSec: duration };
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Nie udało się utworzyć kontekstu canvas");
+
+    const frames: ExtractedFrame[] = [];
+    let prevHash = "";
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (signal?.aborted) throw new DOMException("Anulowano", "AbortError");
+      const ts = timestamps[i];
+      onProgress?.({ phase: "extracting", current: i + 1, total: timestamps.length, percent: Math.round(((i + 1) / timestamps.length) * 100) });
+
+      await seekVideo(video, ts, signal);
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const sample = ctx.getImageData(Math.floor(canvas.width / 4), Math.floor(canvas.height / 4), Math.max(1, Math.min(100, canvas.width)), Math.max(1, Math.min(100, canvas.height)));
+      const hash = quickHash(sample.data);
+      if (hash === prevHash) continue;
+      prevHash = hash;
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((result) => { if (result) resolve(result); else reject(new Error("Nie udało się zapisać klatki")); }, "image/jpeg", 0.75);
+      });
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+      frames.push({ timestamp: ts + timestampOffset, blob, dataUrl });
+    }
+
+    return { frames, durationSec: duration };
   } finally {
     URL.revokeObjectURL(url);
   }
