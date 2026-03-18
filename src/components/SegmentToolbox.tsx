@@ -579,6 +579,8 @@ export default function SegmentToolbox({
 
   async function handleSplitVideoSegment(seg: VideoSegment) {
     if (!seg.signedUrl) { toast.error("Brak URL segmentu"); return; }
+    const ac = new AbortController();
+    abortRef.current = ac;
     setPhase("splitting-video");
     setBatchProgress({ current: 0, total: 0, percent: 0 });
 
@@ -586,6 +588,7 @@ export default function SegmentToolbox({
       toast.loading("Pobieranie segmentu wideo…", { id: "split-video" });
       const res = await fetch(seg.signedUrl);
       const blob = await res.blob();
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
       const inputBytes = new Uint8Array(await blob.arrayBuffer());
 
       // 1. Get real duration using <video> element (much more reliable than FFmpeg probe for webm)
@@ -647,6 +650,8 @@ export default function SegmentToolbox({
         return;
       }
 
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
       toast.loading(`Dzielenie na ~${totalParts} części…`, { id: "split-video" });
 
       const outputPattern = `splitout_%03d${ext}`;
@@ -659,7 +664,7 @@ export default function SegmentToolbox({
         outputPattern,
       ]);
 
-      // Read output parts
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
       const parts: { name: string; data: Uint8Array }[] = [];
       for (let i = 0; i < 999; i++) {
         const partName = `splitout_${String(i).padStart(3, "0")}${ext}`;
@@ -685,6 +690,7 @@ export default function SegmentToolbox({
       setBatchProgress({ current: 0, total: parts.length, percent: 0 });
 
       for (let i = 0; i < parts.length; i++) {
+        if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
         const partFilename = `${segStem}_sub${i + 1}${ext}`;
         const path = `${user.id}/${partFilename}`;
         const partBlob = new Blob([new Uint8Array(parts[i].data)], { type: blob.type || "video/webm" });
@@ -715,12 +721,31 @@ export default function SegmentToolbox({
       await loadVideoSegments();
 
     } catch (err: any) {
-      console.error("Split video error:", err);
-      toast.error("Błąd: " + (err.message || "nieznany"), { id: "split-video" });
+      if (err?.name === "AbortError") {
+        toast.info("Podział anulowany", { id: "split-video" });
+      } else {
+        console.error("Split video error:", err);
+        toast.error("Błąd: " + (err.message || "nieznany"), { id: "split-video" });
+      }
     } finally {
+      abortRef.current = null;
       setPhase("idle");
       setBatchProgress({ current: 0, total: 0, percent: 0 });
     }
+  }
+
+  // Delete all sub-segments for a given video segment (keeps original)
+  async function handleDeleteSubSegments(seg: VideoSegment) {
+    const segStem = seg.name.replace(/\.[^.]+$/, "");
+    const subs = videoSegments.filter(s => s.name.startsWith(segStem + "_sub"));
+    if (subs.length === 0) { toast.info("Brak podsegmentów do usunięcia"); return; }
+    if (!confirm(`Usunąć ${subs.length} podsegmentów "${segStem}_sub*"? Oryginał zostanie zachowany.`)) return;
+
+    const paths = subs.map(s => s.path);
+    const { error } = await supabase.storage.from("recordings").remove(paths);
+    if (error) { toast.error("Błąd usuwania: " + error.message); return; }
+    toast.success(`Usunięto ${subs.length} podsegmentów`);
+    await loadVideoSegments();
   }
 
 
@@ -786,22 +811,31 @@ export default function SegmentToolbox({
                 <span className={`text-[10px] font-mono-data ${isOversized ? "text-destructive font-bold" : "text-muted-foreground/60"}`}>{seg.sizeMB} MB</span>
                 {isOversized && (
                   <>
-                    {/* Check if sub-parts exist for this segment */}
                     {videoSegments.some(s => s.name.startsWith(seg.name.replace(/\.[^.]+$/, "") + "_sub")) ? (
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Usunąć oryginał "${seg.name}" (${seg.sizeMB} MB)? Podsegmenty zostaną zachowane.`)) return;
-                          const { error } = await supabase.storage.from("recordings").remove([seg.path]);
-                          if (error) { toast.error("Błąd usuwania: " + error.message); return; }
-                          toast.success("Usunięto oryginał");
-                          await loadVideoSegments();
-                        }}
-                        disabled={busy}
-                        className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-destructive/30 hover:bg-destructive/10"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Usuń oryginał
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleDeleteSubSegments(seg)}
+                          disabled={busy}
+                          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-border hover:border-destructive/30"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Usuń sub
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Usunąć oryginał "${seg.name}" (${seg.sizeMB} MB)? Podsegmenty zostaną zachowane.`)) return;
+                            const { error } = await supabase.storage.from("recordings").remove([seg.path]);
+                            if (error) { toast.error("Błąd usuwania: " + error.message); return; }
+                            toast.success("Usunięto oryginał");
+                            await loadVideoSegments();
+                          }}
+                          disabled={busy}
+                          className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-destructive/30 hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Usuń oryginał
+                        </button>
+                      </div>
                     ) : (
                       <button
                         onClick={() => handleSplitVideoSegment(seg)}
@@ -892,7 +926,7 @@ export default function SegmentToolbox({
               <span className="font-mono-data">{batchProgress.percent}%</span>
             </div>
             <Progress value={batchProgress.percent} className="h-1.5" />
-            {phase === "batch-frames" && (
+            {(phase === "batch-frames" || phase === "splitting-video") && (
               <button onClick={() => abortRef.current?.abort()} className="text-[10px] text-destructive hover:text-destructive/80 flex items-center gap-1">
                 <X className="w-3 h-3" />Anuluj
               </button>
