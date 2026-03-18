@@ -315,31 +315,35 @@ ZASADY:
         {frames.length > 0 ? (
           <>
             <div className="grid grid-cols-4 gap-1">
-              {frames.slice(0, 8).map((frame, i) => (
-                <div key={i} className="relative">
+              {(showAllFrames ? frames : frames.slice(0, 8)).map((frame, i) => (
+                <div key={i} className="relative group">
                   <img
                     src={frame.url}
                     alt={`Slajd @ ${frame.timestamp}`}
                     className="w-full aspect-video object-cover rounded border border-border"
+                    loading="lazy"
                   />
                   <span className="absolute bottom-0.5 right-0.5 text-[8px] font-mono-data bg-background/80 px-0.5 rounded">
                     {frame.timestamp}
                   </span>
                 </div>
               ))}
-              {frames.length > 8 && (
-                <div className="flex items-center justify-center aspect-video rounded border border-border bg-muted text-[10px] text-muted-foreground">
-                  +{frames.length - 8}
-                </div>
-              )}
             </div>
+            {frames.length > 8 && (
+              <button
+                onClick={() => setShowAllFrames(!showAllFrames)}
+                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showAllFrames ? "Pokaż mniej" : `Pokaż wszystkie (${frames.length})`}
+              </button>
+            )}
             <button
               onClick={handleDownloadFrames}
               disabled={downloading}
               className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
             >
               {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              Pobierz wszystkie klatki
+              Pobierz wszystkie klatki ({frames.length})
             </button>
           </>
         ) : (
