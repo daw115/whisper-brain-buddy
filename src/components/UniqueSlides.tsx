@@ -21,7 +21,7 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
 
   const uniqueFramesData = useMemo(() => {
     const entry = analyses.find(a => a.source === "unique-frames");
-    return entry?.analysis_json as { frames?: { path: string; timestamp_formatted: string }[]; total_unique?: number } | null;
+    return entry?.analysis_json as { frames?: { path: string; timestamp_formatted: string }[]; total_unique?: number; total_before_classification?: number } | null;
   }, [analyses]);
 
   useEffect(() => {
@@ -65,7 +65,12 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
           className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
         >
           <Images className="w-3 h-3 text-primary" />
-          <span className="font-medium text-foreground">{uniqueFramesData.total_unique} unikalnych slajdów</span>
+          <span className="font-medium text-foreground">
+            {uniqueFramesData.total_unique} unikalnych slajdów
+            {uniqueFramesData.total_before_classification && (
+              <span className="text-muted-foreground font-normal"> (z {uniqueFramesData.total_before_classification} klatek)</span>
+            )}
+          </span>
           {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
         <button

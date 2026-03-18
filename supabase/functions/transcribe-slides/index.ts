@@ -196,17 +196,97 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // ========== UNIQUE FRAMES (dedup, no AI) ==========
+    // ========== UNIQUE FRAMES (dedup + AI slide classification) ==========
     if (selectedMode === "unique-frames") {
       console.log("Identifying unique frames...");
       const uniqueFrames = await loadUniqueFrames();
-      const frameData = uniqueFrames.map(f => ({
+      console.log(`Hash-deduped to ${uniqueFrames.length} frames, now classifying with AI...`);
+
+      // Load frames for AI classification
+      const frames = await loadFramesForAI(uniqueFrames);
+      const imageParts = buildImageParts(frames);
+
+      const classifyParts: any[] = [
+        {
+          type: "text",
+          text: `Jesteś ekspertem analizy klatek z nagrań spotkań wideo (Teams/Zoom/Meet).
+
+Poniżej ${frames.length} klatek wyodrębnionych z nagrania spotkania.
+
+## ZADANIE
+Przeanalizuj każdą klatkę i oznacz, czy zawiera **slajd prezentacji** (PowerPoint, Google Slides, Keynote itp.).
+
+**Slajd prezentacji** to klatka, na której widoczna jest:
+- Strona tytułowa, slajd z treścią (bullet pointy, tabele, wykresy, diagramy)
+- Slajd z nagłówkiem i strukturalną zawartością
+- Ekran udostępniania z widoczną prezentacją
+
+**NIE jest slajdem:**
+- Widok kamer uczestników (twarze, galeria wideo)
+- Ekran czatu / lista uczestników
+- Ekran pulpitu / folder z plikami
+- Ekran ładowania / czarny ekran
+- Ekran logowania / lobby spotkania
+
+Dla każdej klatki (po kolei) podaj:
+- index (0-based)
+- is_slide: true/false
+- reason: krótkie uzasadnienie (1 zdanie)`,
+        },
+        ...imageParts,
+      ];
+
+      const classifyResult = await callAI(classifyParts, [{
+        type: "function",
+        function: {
+          name: "classify_frames",
+          description: "Classify which frames contain presentation slides",
+          parameters: {
+            type: "object",
+            properties: {
+              classifications: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    index: { type: "number", description: "0-based index of the frame" },
+                    is_slide: { type: "boolean", description: "Whether this frame shows a presentation slide" },
+                    reason: { type: "string", description: "Short reason for classification" },
+                  },
+                  required: ["index", "is_slide", "reason"],
+                  additionalProperties: false,
+                },
+              },
+              total_slides: { type: "number", description: "Total number of frames classified as slides" },
+            },
+            required: ["classifications", "total_slides"],
+            additionalProperties: false,
+          },
+        },
+      }], { type: "function", function: { name: "classify_frames" } });
+
+      console.log(`AI classified: ${classifyResult.total_slides} slides out of ${frames.length} frames`);
+
+      // Filter only frames classified as slides
+      const slideFrames = uniqueFrames.filter((_, i) => {
+        const c = classifyResult.classifications?.find((cl: any) => cl.index === i);
+        return c?.is_slide === true;
+      });
+
+      console.log(`Final slide count: ${slideFrames.length}`);
+
+      const frameData = slideFrames.map(f => ({
         path: f.path,
         timestamp: f.timestamp,
         timestamp_formatted: `${Math.floor(f.timestamp / 60)}:${String(f.timestamp % 60).padStart(2, "0")}`,
       }));
-      await saveAnalysis("unique-frames", { frames: frameData, total_unique: frameData.length });
-      results.uniqueFrames = { frames: frameData, total_unique: frameData.length };
+      await saveAnalysis("unique-frames", {
+        frames: frameData,
+        total_unique: frameData.length,
+        total_before_classification: uniqueFrames.length,
+        classifications: classifyResult.classifications,
+      });
+      results.uniqueFrames = { frames: frameData, total_unique: frameData.length, total_before_classification: uniqueFrames.length };
     }
 
     // ========== CAPTIONS + SLIDE CONTENT OCR ==========
