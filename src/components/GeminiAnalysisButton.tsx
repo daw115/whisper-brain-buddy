@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { Brain, Loader2, Check, AlertCircle, Image } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Brain, Loader2, Check, AlertCircle, Image, ChevronDown, ChevronUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -11,22 +11,30 @@ interface Props {
   onComplete?: (analysis: any) => void;
 }
 
-// Module-level cache: keyed by "filename:framesVersion"
-const frameCountCache = new Map<string, { total: number; unique: number }>();
+interface FramePreview {
+  url: string;
+  timestamp: string;
+}
+
+// Module-level cache
+const frameCache = new Map<string, { total: number; unique: number; previews: FramePreview[] }>();
 
 export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFilename, framesVersion = 0, onComplete }: Props) {
   const [analyzing, setAnalyzing] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frameCounts, setFrameCounts] = useState<{ total: number; unique: number } | null>(null);
+  const [previews, setPreviews] = useState<FramePreview[]>([]);
   const [loadingFrames, setLoadingFrames] = useState(false);
+  const [showPreviews, setShowPreviews] = useState(false);
 
   useEffect(() => {
     if (hasFrames && recordingFilename) {
       const cacheKey = `${recordingFilename}:${framesVersion}`;
-      const cached = frameCountCache.get(cacheKey);
+      const cached = frameCache.get(cacheKey);
       if (cached) {
-        setFrameCounts(cached);
+        setFrameCounts({ total: cached.total, unique: cached.unique });
+        setPreviews(cached.previews);
         return;
       }
       countUniqueFrames(cacheKey);
@@ -66,20 +74,21 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
 
       if (allFiles.length === 0) {
         setFrameCounts({ total: 0, unique: 0 });
+        setPreviews([]);
         return;
       }
 
       allFiles.sort((a, b) => a.timestamp - b.timestamp);
       const selected = allFiles.slice(0, 30);
 
-      // Download and deduplicate
-      const seenHashes = new Set<string>();
-      let uniqueCount = 0;
-
       const { data: signed } = await supabase.storage.from("recordings").createSignedUrls(selected.map(f => f.path), 600);
       if (!signed) { setFrameCounts({ total: allFiles.length, unique: allFiles.length }); return; }
 
-      for (const s of signed) {
+      const seenHashes = new Set<string>();
+      const uniquePreviews: FramePreview[] = [];
+
+      for (let i = 0; i < signed.length; i++) {
+        const s = signed[i];
         if (!s.signedUrl) continue;
         try {
           const res = await fetch(s.signedUrl);
@@ -93,14 +102,21 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
           const hashStr = hash.toString(36);
           if (!seenHashes.has(hashStr)) {
             seenHashes.add(hashStr);
-            uniqueCount++;
+            const secs = selected[i].timestamp;
+            const mins = Math.floor(secs / 60);
+            const sec = secs % 60;
+            uniquePreviews.push({
+              url: s.signedUrl,
+              timestamp: `${mins}:${String(sec).padStart(2, "0")}`,
+            });
           }
         } catch { /* skip */ }
       }
 
-      const result = { total: allFiles.length, unique: uniqueCount };
-      frameCountCache.set(cacheKey, result);
-      setFrameCounts(result);
+      const result = { total: allFiles.length, unique: uniquePreviews.length, previews: uniquePreviews };
+      frameCache.set(cacheKey, result);
+      setFrameCounts({ total: result.total, unique: result.unique });
+      setPreviews(uniquePreviews);
     } catch (err) {
       console.error("Count frames error:", err);
     } finally {
@@ -160,26 +176,51 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
         )}
       </button>
 
-      {/* Frame count indicator */}
+      {/* Frame count + toggle */}
       {hasFrames && (
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground justify-center">
+        <button
+          onClick={() => previews.length > 0 && setShowPreviews(!showPreviews)}
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground justify-center w-full hover:text-foreground transition-colors"
+        >
           <Image className="w-3 h-3" />
           {loadingFrames ? (
             <span>Sprawdzanie klatek…</span>
           ) : frameCounts ? (
             frameCounts.unique > 0 ? (
-              <span>
-                {frameCounts.unique} unikalnych klatek
-                {frameCounts.total > frameCounts.unique && (
-                  <span className="text-muted-foreground/60"> (z {frameCounts.total}, {frameCounts.total - frameCounts.unique} duplikatów)</span>
-                )}
-              </span>
+              <>
+                <span>
+                  {frameCounts.unique} unikalnych klatek
+                  {frameCounts.total > frameCounts.unique && (
+                    <span className="text-muted-foreground/60"> (z {frameCounts.total}, {frameCounts.total - frameCounts.unique} dupl.)</span>
+                  )}
+                </span>
+                {showPreviews ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </>
             ) : (
               <span>Brak klatek</span>
             )
           ) : (
             <span>Slajdy + transkrypt → analiza multimodalna</span>
           )}
+        </button>
+      )}
+
+      {/* Thumbnail previews */}
+      {showPreviews && previews.length > 0 && (
+        <div className="grid grid-cols-4 gap-1 max-h-48 overflow-y-auto rounded border border-border p-1 bg-muted/20">
+          {previews.map((frame, i) => (
+            <div key={i} className="relative group">
+              <img
+                src={frame.url}
+                alt={`Klatka @ ${frame.timestamp}`}
+                className="w-full aspect-video object-cover rounded-sm"
+                loading="lazy"
+              />
+              <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center bg-background/80 text-foreground py-px rounded-b-sm">
+                {frame.timestamp}
+              </span>
+            </div>
+          ))}
         </div>
       )}
 
