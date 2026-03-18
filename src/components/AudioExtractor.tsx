@@ -644,6 +644,38 @@ export default function AudioExtractor({
                   )}
                 </div>
               ))}
+
+              {/* Batch transcribe button */}
+              <div className="pt-2 border-t border-border">
+                <button
+                  onClick={handleBatchTranscribe}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                >
+                  {phase === "batch-transcribing" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Transkrypcja {batchProgress.current}/{batchProgress.total}…
+                    </>
+                  ) : (
+                    <>
+                      <FileAudio className="w-3.5 h-3.5" />
+                      Transkrybuj wszystkie (Gemini)
+                    </>
+                  )}
+                </button>
+                {phase === "batch-transcribing" && batchProgress.total > 0 && (
+                  <div className="mt-1.5">
+                    <Progress
+                      value={Math.round((batchProgress.current / batchProgress.total) * 100)}
+                      className="h-1.5"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Segment {batchProgress.current} z {batchProgress.total} • język: {TRANSCRIPTION_LANGUAGES.find(l => l.code === language)?.label}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
