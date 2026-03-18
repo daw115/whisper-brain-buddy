@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Search, Mic, FileText, CheckSquare, Lightbulb, Loader2, Plus } from "lucide-react";
+import { Search, Mic, FileText, CheckSquare, Lightbulb, Loader2, Plus, FolderOpen } from "lucide-react";
 import MeetingCard from "@/components/MeetingCard";
 import CreateMeetingDialog from "@/components/CreateMeetingDialog";
-import { useMeetings } from "@/hooks/use-meetings";
+import { useMeetings, useCategories } from "@/hooks/use-meetings";
 
 interface DashboardProps {
   onStartRecording: () => void;
@@ -11,13 +11,19 @@ interface DashboardProps {
 export default function Dashboard({ onStartRecording }: DashboardProps) {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const { data: meetings = [], isLoading } = useMeetings();
+  const { data: categories = [] } = useCategories();
 
-  const filtered = meetings.filter(
-    (m) =>
+  const filtered = meetings.filter((m) => {
+    const matchesSearch =
       m.title.toLowerCase().includes(search.toLowerCase()) ||
-      (m.tags || []).some((t) => t.includes(search.toLowerCase()))
-  );
+      (m.tags || []).some((t) => t.includes(search.toLowerCase()));
+    const matchesCategory =
+      selectedCategory === "all" ||
+      (selectedCategory === "uncategorized" ? !m.category_id : m.category_id === selectedCategory);
+    return matchesSearch && matchesCategory;
+  });
 
   const totalTasks = meetings.reduce((sum, m) => sum + (m.action_items?.length || 0), 0);
   const openTasks = meetings.reduce(
@@ -75,6 +81,46 @@ export default function Dashboard({ onStartRecording }: DashboardProps) {
           </div>
         ))}
       </div>
+
+      {/* Category filter */}
+      {categories.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+          <FolderOpen className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <button
+            onClick={() => setSelectedCategory("all")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+              selectedCategory === "all"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Wszystkie
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                selectedCategory === cat.id
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {cat.name}
+            </button>
+          ))}
+          <button
+            onClick={() => setSelectedCategory("uncategorized")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+              selectedCategory === "uncategorized"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Bez kategorii
+          </button>
+        </div>
+      )}
 
       <div className="relative mb-6">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

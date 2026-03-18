@@ -13,6 +13,7 @@ export type DbMeeting = {
   recording_filename: string | null;
   recording_size_bytes: number | null;
   created_at: string;
+  category_id: string | null;
 };
 
 export type DbActionItem = {
@@ -48,12 +49,18 @@ export type DbParticipant = {
   name: string;
 };
 
+export type DbCategory = {
+  id: string;
+  name: string;
+};
+
 // Full meeting with relations
 export type MeetingWithRelations = DbMeeting & {
   action_items: DbActionItem[];
   decisions: DbDecision[];
   transcript_lines?: DbTranscriptLine[];
   meeting_participants: DbParticipant[];
+  categories?: DbCategory | null;
 };
 
 export function useMeetings() {
@@ -62,7 +69,7 @@ export function useMeetings() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("meetings")
-        .select("*, meeting_participants(*), action_items(*), decisions(*)")
+        .select("*, meeting_participants(*), action_items(*), decisions(*), categories:category_id(*)")
         .order("date", { ascending: false });
       if (error) throw error;
       return data as MeetingWithRelations[];
@@ -77,7 +84,7 @@ export function useMeeting(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("meetings")
-        .select("*, meeting_participants(*), action_items(*), decisions(*), transcript_lines(*)")
+        .select("*, meeting_participants(*), action_items(*), decisions(*), transcript_lines(*), categories:category_id(*)")
         .eq("id", id!)
         .single();
       if (error) throw error;
@@ -86,6 +93,20 @@ export function useMeeting(id: string | undefined) {
         data.transcript_lines.sort((a: DbTranscriptLine, b: DbTranscriptLine) => a.line_order - b.line_order);
       }
       return data as MeetingWithRelations;
+    },
+  });
+}
+
+export function useCategories() {
+  return useQuery({
+    queryKey: ["categories"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("categories")
+        .select("id, name")
+        .order("name");
+      if (error) throw error;
+      return data as DbCategory[];
     },
   });
 }
@@ -115,6 +136,7 @@ export function useCreateMeeting() {
       participants?: string[];
       tags?: string[];
       summary?: string;
+      category_id?: string;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -129,6 +151,7 @@ export function useCreateMeeting() {
           recording_size_bytes: meeting.recording_size_bytes,
           tags: meeting.tags?.length ? meeting.tags : [],
           summary: meeting.summary,
+          category_id: meeting.category_id || null,
         })
         .select()
         .single();
