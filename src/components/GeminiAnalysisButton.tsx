@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Brain, Loader2, Check, AlertCircle, Image } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -11,6 +11,9 @@ interface Props {
   onComplete?: (analysis: any) => void;
 }
 
+// Module-level cache: keyed by "filename:framesVersion"
+const frameCountCache = new Map<string, { total: number; unique: number }>();
+
 export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFilename, framesVersion = 0, onComplete }: Props) {
   const [analyzing, setAnalyzing] = useState(false);
   const [done, setDone] = useState(false);
@@ -20,11 +23,17 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
 
   useEffect(() => {
     if (hasFrames && recordingFilename) {
-      countUniqueFrames();
+      const cacheKey = `${recordingFilename}:${framesVersion}`;
+      const cached = frameCountCache.get(cacheKey);
+      if (cached) {
+        setFrameCounts(cached);
+        return;
+      }
+      countUniqueFrames(cacheKey);
     }
   }, [hasFrames, recordingFilename, framesVersion]);
 
-  async function countUniqueFrames() {
+  async function countUniqueFrames(cacheKey: string) {
     if (!recordingFilename) return;
     setLoadingFrames(true);
     try {
@@ -89,7 +98,9 @@ export default function GeminiAnalysisButton({ meetingId, hasFrames, recordingFi
         } catch { /* skip */ }
       }
 
-      setFrameCounts({ total: allFiles.length, unique: uniqueCount });
+      const result = { total: allFiles.length, unique: uniqueCount };
+      frameCountCache.set(cacheKey, result);
+      setFrameCounts(result);
     } catch (err) {
       console.error("Count frames error:", err);
     } finally {
