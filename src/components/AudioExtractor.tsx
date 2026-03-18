@@ -347,10 +347,25 @@ export default function AudioExtractor({
 
   return (
     <div className="space-y-3">
-      <h3 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider flex items-center gap-1.5">
-        <FileAudio className="w-3.5 h-3.5" />
-        Audio (MP3)
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider flex items-center gap-1.5">
+          <FileAudio className="w-3.5 h-3.5" />
+          Audio (MP3)
+        </h3>
+        <div className="flex items-center gap-1.5">
+          <Languages className="w-3 h-3 text-muted-foreground" />
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
+            disabled={busy}
+            className="text-[10px] bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground"
+          >
+            {TRANSCRIPTION_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>{l.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* Main MP3 */}
       {mainAudio ? (
