@@ -664,7 +664,7 @@ export default function SegmentToolbox({
         outputPattern,
       ]);
 
-      // Read output parts
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
       const parts: { name: string; data: Uint8Array }[] = [];
       for (let i = 0; i < 999; i++) {
         const partName = `splitout_${String(i).padStart(3, "0")}${ext}`;
