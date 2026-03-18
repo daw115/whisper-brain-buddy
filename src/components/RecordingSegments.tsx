@@ -142,7 +142,59 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
-  if (loading) {
+  async function handleBatchFrames() {
+    const segsWithUrl = segments.filter((s) => s.signedUrl);
+    if (segsWithUrl.length === 0) return;
+
+    const ac = new AbortController();
+    batchAbortRef.current = ac;
+    setBatchGenerating(true);
+    let totalFrames = 0;
+
+    try {
+      const { extractFrames, uploadFrames } = await import("@/lib/frame-extractor");
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Nie zalogowano");
+
+      for (let i = 0; i < segsWithUrl.length; i++) {
+        if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
+        const seg = segsWithUrl[i];
+        setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: "loading", percent: 0 });
+
+        const res = await fetch(seg.signedUrl!);
+        const videoBlob = await res.blob();
+        if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
+        setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: "extracting", percent: 0 });
+        const frames = await extractFrames(videoBlob, batchInterval, 50, (info) => {
+          setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: info.phase, percent: info.percent });
+        }, ac.signal);
+
+        if (frames.length > 0) {
+          const segStem = seg.name.replace(/\.[^.]+$/, "");
+          await uploadFrames(supabase, user.id, segStem, frames, (info) => {
+            setBatchProgress({ segIdx: i + 1, total: segsWithUrl.length, phase: info.phase, percent: info.percent });
+          }, ac.signal);
+          totalFrames += frames.length;
+        }
+      }
+
+      toast.success(`Wygenerowano ${totalFrames} klatek z ${segsWithUrl.length} segmentów`);
+      onFramesGenerated?.();
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        toast.info("Generowanie klatek anulowane");
+      } else {
+        toast.error("Błąd: " + (err.message || "nieznany"));
+      }
+    } finally {
+      batchAbortRef.current = null;
+      setBatchGenerating(false);
+      setBatchProgress(null);
+    }
+  }
+
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
         <Loader2 className="w-3 h-3 animate-spin" />
