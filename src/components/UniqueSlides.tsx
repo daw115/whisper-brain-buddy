@@ -19,13 +19,31 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const uniqueFramesData = useMemo(() => {
-    const entry = analyses.find(a => a.source === "unique-frames");
-    return entry?.analysis_json as { frames?: { path: string; timestamp_formatted: string }[]; total_unique?: number; total_before_classification?: number } | null;
+  // Support both new crop-split and legacy unique-frames
+  const slideData = useMemo(() => {
+    const cropSplit = analyses.find(a => a.source === "crop-split");
+    if (cropSplit?.analysis_json?.unique_slides?.length) {
+      return {
+        frames: cropSplit.analysis_json.unique_slides as { path: string; ts_formatted: string }[],
+        total_unique: cropSplit.analysis_json.total_unique_slides as number,
+        total_frames: cropSplit.analysis_json.total_frames as number,
+        source: "crop-split" as const,
+      };
+    }
+    const legacy = analyses.find(a => a.source === "unique-frames");
+    if (legacy?.analysis_json?.frames?.length) {
+      return {
+        frames: legacy.analysis_json.frames.map((f: any) => ({ path: f.path, ts_formatted: f.timestamp_formatted })),
+        total_unique: legacy.analysis_json.total_unique as number,
+        total_frames: legacy.analysis_json.total_before_classification as number | undefined,
+        source: "unique-frames" as const,
+      };
+    }
+    return null;
   }, [analyses]);
 
   useEffect(() => {
-    if (!uniqueFramesData?.frames?.length) {
+    if (!slideData?.frames?.length) {
       setThumbnails([]);
       return;
     }
@@ -33,24 +51,24 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
     setLoading(true);
     (async () => {
       const loaded: { url: string; timestamp: string }[] = [];
-      for (const frame of uniqueFramesData.frames!) {
+      for (const frame of slideData.frames) {
         const { data } = await supabase.storage
           .from("recordings")
           .createSignedUrl(frame.path, 60 * 60);
         if (data?.signedUrl) {
-          loaded.push({ url: data.signedUrl, timestamp: frame.timestamp_formatted });
+          loaded.push({ url: data.signedUrl, timestamp: frame.ts_formatted });
         }
       }
       setThumbnails(loaded);
       setLoading(false);
     })();
-  }, [uniqueFramesData]);
+  }, [slideData]);
 
-  if (!uniqueFramesData?.total_unique) {
+  if (!slideData?.total_unique) {
     return (
       <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
         <Images className="w-3 h-3" />
-        Brak slajdów — uruchom OCR klatek
+        Brak slajdów — uruchom pipeline OCR
       </p>
     );
   }
@@ -66,17 +84,17 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
         >
           <Images className="w-3 h-3 text-primary" />
           <span className="font-medium text-foreground">
-            {uniqueFramesData.total_unique} unikalnych slajdów
-            {uniqueFramesData.total_before_classification && (
-              <span className="text-muted-foreground font-normal"> (z {uniqueFramesData.total_before_classification} klatek)</span>
+            {slideData.total_unique} unikalnych slajdów
+            {slideData.total_frames && (
+              <span className="text-muted-foreground font-normal"> (z {slideData.total_frames} klatek)</span>
             )}
           </span>
           {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
         <button
           onClick={async () => {
-            if (!confirm("Usunąć dane slajdów (unique-frames, captions-ocr, merged)?")) return;
-            const sources = ["unique-frames", "captions-ocr", "merged"];
+            if (!confirm("Usunąć dane slajdów?")) return;
+            const sources = ["unique-frames", "crop-split", "captions-ocr", "slide-descriptions", "merged"];
             const { error } = await (supabase as any)
               .from("meeting_analyses")
               .delete()
@@ -85,7 +103,7 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
             if (error) {
               toast.error("Błąd: " + error.message);
             } else {
-              toast.success("Slajdy wyczyszczone");
+              toast.success("Dane slajdów wyczyszczone");
               setThumbnails([]);
               onDeleted?.();
             }

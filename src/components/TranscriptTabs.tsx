@@ -34,8 +34,17 @@ export default function TranscriptTabs({ meeting, analyses, onDeleteTranscript }
     } | null;
   }, [analyses]);
 
-  // Unique frames data
+  // Unique frames data (support both crop-split and legacy unique-frames)
   const uniqueFramesData = useMemo(() => {
+    const cropSplit = analyses.find(a => a.source === "crop-split");
+    if (cropSplit?.analysis_json?.unique_slides?.length) {
+      return {
+        frames: cropSplit.analysis_json.unique_slides.map((s: any) => ({
+          path: s.path, timestamp: s.timestamp, timestamp_formatted: s.ts_formatted,
+        })),
+        total_unique: cropSplit.analysis_json.total_unique_slides,
+      };
+    }
     const entry = analyses.find(a => a.source === "unique-frames");
     return entry?.analysis_json as { frames?: { path: string; timestamp: number; timestamp_formatted: string }[]; total_unique?: number } | null;
   }, [analyses]);

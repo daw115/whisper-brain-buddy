@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { decode as decodeJpeg, encode as encodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,8 +17,8 @@ serve(async (req) => {
     const { meetingId, mode } = await req.json();
     if (!meetingId) throw new Error("meetingId is required");
 
-    // mode: "unique-frames" | "captions" | "aggregate"
-    const selectedMode = mode || "unique-frames";
+    // mode: "crop-split" | "ocr-captions" | "describe-slides" | "aggregate"
+    const selectedMode = mode || "crop-split";
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -106,8 +107,8 @@ serve(async (req) => {
       return data?.analysis_json ?? null;
     }
 
-    // Load and deduplicate frames
-    async function loadUniqueFrames() {
+    // Collect all frame file paths sorted by timestamp
+    async function collectFramePaths(): Promise<{ path: string; timestamp: number }[]> {
       if (!meeting.recording_filename) throw { status: 400, message: "No recording filename" };
 
       const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
@@ -118,7 +119,7 @@ serve(async (req) => {
 
       if (allDirs) {
         for (const d of allDirs) {
-          if (d.name.startsWith(stem + "_part")) {
+          if (d.name.startsWith(stem + "_part") || d.name.startsWith(stem + "_sub")) {
             dirPrefixes.push(`${meeting.user_id}/frames/${d.name}`);
           }
         }
@@ -128,7 +129,7 @@ serve(async (req) => {
       for (const prefix of dirPrefixes) {
         const { data: files } = await supabaseAdmin.storage
           .from("recordings")
-          .list(prefix, { limit: 100, sortBy: { column: "name", order: "asc" } });
+          .list(prefix, { limit: 200, sortBy: { column: "name", order: "asc" } });
         if (files) {
           for (const f of files) {
             if (!f.name.match(/\.(jpg|jpeg|png)$/i)) continue;
@@ -140,260 +141,369 @@ serve(async (req) => {
 
       allFiles.sort((a, b) => a.timestamp - b.timestamp);
       console.log(`Found ${allFiles.length} frame files across ${dirPrefixes.length} dirs`);
-
       if (allFiles.length === 0) throw { status: 400, message: "No frames found — generate frames first" };
+      return allFiles;
+    }
 
-      // Deduplicate by 2KB header hash
-      const unique: { path: string; timestamp: number }[] = [];
-      const seenHashes = new Set<string>();
+    // Detect caption bar height by scanning from bottom for dark rows
+    function detectCaptionBarY(pixels: Uint8Array, width: number, height: number): number {
+      // Scan from bottom up, find where the dark region ends
+      // Dark row = average brightness < 50
+      const DARK_THRESHOLD = 50;
+      const MIN_BAR_HEIGHT = 40; // at least 40px
+      const MAX_BAR_HEIGHT = Math.floor(height * 0.25); // at most 25%
 
-      for (const ff of allFiles.slice(0, 60)) {
-        const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
-        if (!data) continue;
-
-        const bytes = new Uint8Array(await data.arrayBuffer());
-        let hash = 0;
-        const slice = bytes.slice(0, 2048);
-        for (let j = 0; j < slice.length; j += 4) {
-          hash = ((hash << 5) - hash + slice[j]) | 0;
+      let darkEnd = 0; // how many rows from bottom are dark
+      for (let row = height - 1; row >= height - MAX_BAR_HEIGHT; row--) {
+        let sumBrightness = 0;
+        const sampleStep = Math.max(1, Math.floor(width / 50)); // sample ~50 pixels per row
+        let samples = 0;
+        for (let x = 0; x < width; x += sampleStep) {
+          const idx = (row * width + x) * 4;
+          const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+          sumBrightness += (r + g + b) / 3;
+          samples++;
         }
-        const hashStr = hash.toString(36);
-        if (seenHashes.has(hashStr)) continue;
-        seenHashes.add(hashStr);
-        unique.push(ff);
-        if (unique.length >= 30) break;
+        const avg = sumBrightness / samples;
+        if (avg < DARK_THRESHOLD) {
+          darkEnd = height - row;
+        } else {
+          // Found a non-dark row, stop
+          break;
+        }
       }
 
-      console.log(`Deduplicated to ${unique.length} unique frames`);
-      return unique;
+      if (darkEnd < MIN_BAR_HEIGHT) {
+        // No caption bar detected, use a default ~15%
+        console.log(`No dark caption bar detected (darkEnd=${darkEnd}px), using 15% default`);
+        return Math.floor(height * 0.85);
+      }
+
+      // Add a small padding (10px) above the dark region
+      const captionTop = height - darkEnd - 10;
+      console.log(`Caption bar detected: starts at y=${captionTop} (bar height=${darkEnd + 10}px, image height=${height})`);
+      return Math.max(0, captionTop);
     }
 
-    // Load frames + build image parts for AI
-    async function loadFramesForAI(uniqueFrames: { path: string; timestamp: number }[]) {
-      const frames: { base64: string; mimeType: string; timestamp: string }[] = [];
-      for (const ff of uniqueFrames.slice(0, 25)) {
-        const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
-        if (!data) continue;
-        const bytes = new Uint8Array(await data.arrayBuffer());
-        const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
-        const isJpeg = ff.path.match(/\.jpe?g$/i);
-        const mimeType = isJpeg ? "image/jpeg" : "image/png";
-        const mins = Math.floor(ff.timestamp / 60);
-        const secs = ff.timestamp % 60;
-        frames.push({ base64, mimeType, timestamp: `${mins}:${String(secs).padStart(2, "0")}` });
+    // Crop JPEG bytes → returns { slideJpeg, captionJpeg, width, height, captionBarY }
+    function cropFrame(jpegBytes: Uint8Array, captionBarY: number) {
+      const decoded = decodeJpeg(jpegBytes, { useTArray: true, formatAsRGBA: true });
+      const { width, height, data } = decoded;
+
+      // Slide = top portion (0 to captionBarY)
+      const slideH = captionBarY;
+      const slidePixels = new Uint8Array(width * slideH * 4);
+      for (let row = 0; row < slideH; row++) {
+        const srcOff = row * width * 4;
+        const dstOff = row * width * 4;
+        slidePixels.set(data.subarray(srcOff, srcOff + width * 4), dstOff);
       }
-      return frames;
+
+      // Caption = bottom portion (captionBarY to height)
+      const captionH = height - captionBarY;
+      const captionPixels = new Uint8Array(width * captionH * 4);
+      for (let row = 0; row < captionH; row++) {
+        const srcOff = (captionBarY + row) * width * 4;
+        const dstOff = row * width * 4;
+        captionPixels.set(data.subarray(srcOff, srcOff + width * 4), dstOff);
+      }
+
+      const slideJpeg = encodeJpeg({ data: slidePixels, width, height: slideH }, 80);
+      const captionJpeg = encodeJpeg({ data: captionPixels, width, height: captionH }, 80);
+
+      return {
+        slideJpeg: new Uint8Array(slideJpeg.data),
+        captionJpeg: new Uint8Array(captionJpeg.data),
+        width, height, slideH, captionH,
+      };
     }
 
-    function buildImageParts(frames: { base64: string; mimeType: string; timestamp: string }[]) {
-      const parts: any[] = [];
-      for (const frame of frames) {
-        parts.push({ type: "text", text: `\n--- Klatka @ ${frame.timestamp} ---` });
-        parts.push({ type: "image_url", image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` } });
+    // Hash slide pixels for dedup (uses 4KB sample from slide jpeg)
+    function hashSlideBytes(jpegBytes: Uint8Array): string {
+      let hash = 0;
+      const sample = jpegBytes.slice(200, 4200); // skip JPEG header, sample 4KB
+      for (let i = 0; i < sample.length; i += 2) {
+        hash = ((hash << 5) - hash + sample[i]) | 0;
       }
-      return parts;
+      return hash.toString(36);
+    }
+
+    function formatTs(seconds: number): string {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+
+    function bytesToBase64(bytes: Uint8Array): string {
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
     }
 
     const results: Record<string, any> = {};
 
-    // ========== UNIQUE FRAMES (dedup + AI slide classification) ==========
-    if (selectedMode === "unique-frames") {
-      console.log("Identifying unique frames...");
-      const uniqueFrames = await loadUniqueFrames();
-      console.log(`Hash-deduped to ${uniqueFrames.length} frames, now classifying with AI...`);
+    // ========== STEP 3: CROP-SPLIT ==========
+    if (selectedMode === "crop-split") {
+      console.log("Step 3: Crop-split frames into slides + captions...");
+      const framePaths = await collectFramePaths();
 
-      // Load frames for AI classification
-      const frames = await loadFramesForAI(uniqueFrames);
-      const imageParts = buildImageParts(frames);
+      // Download first frame to detect caption bar height
+      const { data: firstBlob } = await supabaseAdmin.storage.from("recordings").download(framePaths[0].path);
+      if (!firstBlob) throw { status: 500, message: "Cannot download first frame" };
+      const firstBytes = new Uint8Array(await firstBlob.arrayBuffer());
+      const firstDecoded = decodeJpeg(firstBytes, { useTArray: true, formatAsRGBA: true });
+      const captionBarY = detectCaptionBarY(
+        firstDecoded.data, firstDecoded.width, firstDecoded.height
+      );
 
-      const classifyParts: any[] = [
-        {
-          type: "text",
-          text: `Jesteś ekspertem analizy klatek z nagrań spotkań wideo (Teams/Zoom/Meet).
+      const stem = meeting.recording_filename!.replace(/\.[^.]+$/, "");
+      const slidesDir = `${meeting.user_id}/crops/${stem}/slides`;
+      const captionsDir = `${meeting.user_id}/crops/${stem}/captions`;
 
-Poniżej ${frames.length} klatek wyodrębnionych z nagrania spotkania.
+      // Process frames, dedup slides
+      const seenSlideHashes = new Map<string, number>(); // hash → first timestamp
+      const uniqueSlides: { path: string; timestamp: number; ts_formatted: string }[] = [];
+      const allCaptions: { path: string; timestamp: number; ts_formatted: string }[] = [];
+      let processedCount = 0;
+
+      for (const frame of framePaths.slice(0, 120)) { // limit to 120 frames
+        const { data: blob } = await supabaseAdmin.storage.from("recordings").download(frame.path);
+        if (!blob) continue;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+
+        const { slideJpeg, captionJpeg } = cropFrame(bytes, captionBarY);
+        const tsFormatted = formatTs(frame.timestamp);
+
+        // Upload caption crop (always)
+        const captionPath = `${captionsDir}/caption_${tsFormatted.replace(":", "_")}.jpg`;
+        await supabaseAdmin.storage.from("recordings").upload(captionPath, captionJpeg, {
+          contentType: "image/jpeg", upsert: true,
+        });
+        allCaptions.push({ path: captionPath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+
+        // Dedup slides by hash
+        const slideHash = hashSlideBytes(slideJpeg);
+        if (!seenSlideHashes.has(slideHash)) {
+          seenSlideHashes.set(slideHash, frame.timestamp);
+          const slidePath = `${slidesDir}/slide_${tsFormatted.replace(":", "_")}.jpg`;
+          await supabaseAdmin.storage.from("recordings").upload(slidePath, slideJpeg, {
+            contentType: "image/jpeg", upsert: true,
+          });
+          uniqueSlides.push({ path: slidePath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+        }
+
+        processedCount++;
+        if (processedCount % 20 === 0) {
+          console.log(`Processed ${processedCount}/${framePaths.length} frames, ${uniqueSlides.length} unique slides so far`);
+        }
+      }
+
+      console.log(`Crop-split done: ${processedCount} frames → ${uniqueSlides.length} unique slides, ${allCaptions.length} caption crops`);
+
+      const cropData = {
+        caption_bar_y: captionBarY,
+        image_height: firstDecoded.height,
+        image_width: firstDecoded.width,
+        caption_bar_percent: Math.round((1 - captionBarY / firstDecoded.height) * 100),
+        unique_slides: uniqueSlides,
+        caption_crops: allCaptions,
+        total_frames: processedCount,
+        total_unique_slides: uniqueSlides.length,
+        total_captions: allCaptions.length,
+      };
+      await saveAnalysis("crop-split", cropData);
+      results.cropSplit = cropData;
+    }
+
+    // ========== STEP 4: OCR CAPTIONS ==========
+    if (selectedMode === "ocr-captions") {
+      console.log("Step 4: OCR caption crops...");
+
+      const cropData = await loadLatest("crop-split") as any;
+      if (!cropData?.caption_crops?.length) {
+        throw { status: 400, message: "Run crop-split first" };
+      }
+
+      const captionCrops = cropData.caption_crops as { path: string; timestamp: number; ts_formatted: string }[];
+
+      // Load caption images in batches of 25 for AI
+      const BATCH_SIZE = 25;
+      const allEntries: { timestamp: string; speaker: string; text: string }[] = [];
+      const speakersSet = new Set<string>();
+
+      for (let batchStart = 0; batchStart < captionCrops.length; batchStart += BATCH_SIZE) {
+        const batch = captionCrops.slice(batchStart, batchStart + BATCH_SIZE);
+        const imageParts: any[] = [];
+
+        for (const cap of batch) {
+          const { data: blob } = await supabaseAdmin.storage.from("recordings").download(cap.path);
+          if (!blob) continue;
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          const base64 = bytesToBase64(bytes);
+          imageParts.push({ type: "text", text: `\n--- Napis @ ${cap.ts_formatted} ---` });
+          imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
+        }
+
+        if (imageParts.length === 0) continue;
+
+        const ocrParts: any[] = [
+          {
+            type: "text",
+            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} wyciętych pasków z napisami (live captions) z nagrania spotkania Teams.
+
+Każdy obrazek to DOLNY pasek ekranu z ciemnym tłem, zawierający napisy/subtitles.
 
 ## ZADANIE
-Przeanalizuj każdą klatkę i oznacz, czy zawiera **slajd prezentacji** (PowerPoint, Google Slides, Keynote itp.).
+1. Odczytaj tekst z każdego paska
+2. Zidentyfikuj mówcę (imię widoczne obok tekstu)
+3. Połącz fragmenty w spójne zdania (napisy Teams są urywane w połowie zdań)
+4. Połącz powtarzające się fragmenty w jedno pełne zdanie
+5. NIE duplikuj — jeśli kolejne klatki mają ten sam tekst, zapisz go tylko raz
 
-**Slajd prezentacji** to klatka, na której widoczna jest:
-- Strona tytułowa, slajd z treścią (bullet pointy, tabele, wykresy, diagramy)
-- Slajd z nagłówkiem i strukturalną zawartością
-- Ekran udostępniania z widoczną prezentacją
+Zwróć wynik jako listę chronologicznych wypowiedzi.`,
+          },
+          ...imageParts,
+        ];
 
-**NIE jest slajdem:**
-- Widok kamer uczestników (twarze, galeria wideo)
-- Ekran czatu / lista uczestników
-- Ekran pulpitu / folder z plikami
-- Ekran ładowania / czarny ekran
-- Ekran logowania / lobby spotkania
+        const batchResult = await callAI(ocrParts, [{
+          type: "function",
+          function: {
+            name: "save_caption_ocr",
+            description: "Save OCR results from caption bar crops",
+            parameters: {
+              type: "object",
+              properties: {
+                entries: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      timestamp: { type: "string", description: "MM:SS" },
+                      speaker: { type: "string", description: "Imię mówcy" },
+                      text: { type: "string", description: "Pełne zdanie" },
+                    },
+                    required: ["timestamp", "speaker", "text"],
+                    additionalProperties: false,
+                  },
+                },
+                speakers: {
+                  type: "array",
+                  items: { type: "string" },
+                },
+              },
+              required: ["entries", "speakers"],
+              additionalProperties: false,
+            },
+          },
+        }], { type: "function", function: { name: "save_caption_ocr" } });
 
-Dla każdej klatki (po kolei) podaj:
-- index (0-based)
-- is_slide: true/false
-- reason: krótkie uzasadnienie (1 zdanie)`,
+        if (batchResult.entries) allEntries.push(...batchResult.entries);
+        if (batchResult.speakers) batchResult.speakers.forEach((s: string) => speakersSet.add(s));
+
+        console.log(`OCR batch ${batchStart / BATCH_SIZE + 1}: ${batchResult.entries?.length ?? 0} entries`);
+      }
+
+      // Build transcript text
+      const transcript = allEntries.map(e => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n");
+
+      const ocrResult = {
+        transcript,
+        entries: allEntries,
+        total_entries: allEntries.length,
+        speakers_identified: Array.from(speakersSet),
+      };
+
+      console.log(`OCR total: ${allEntries.length} entries, ${speakersSet.size} speakers`);
+      await saveAnalysis("captions-ocr", ocrResult);
+      results.captions = ocrResult;
+    }
+
+    // ========== STEP 5: DESCRIBE SLIDES ==========
+    if (selectedMode === "describe-slides") {
+      console.log("Step 5: Describe unique slides...");
+
+      const cropData = await loadLatest("crop-split") as any;
+      if (!cropData?.unique_slides?.length) {
+        throw { status: 400, message: "Run crop-split first" };
+      }
+
+      const slides = cropData.unique_slides as { path: string; timestamp: number; ts_formatted: string }[];
+
+      // Load slide images for AI (max 25)
+      const imageParts: any[] = [];
+      for (const slide of slides.slice(0, 25)) {
+        const { data: blob } = await supabaseAdmin.storage.from("recordings").download(slide.path);
+        if (!blob) continue;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const base64 = bytesToBase64(bytes);
+        imageParts.push({ type: "text", text: `\n--- Slajd @ ${slide.ts_formatted} (pierwszy raz) ---` });
+        imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
+      }
+
+      const describeParts: any[] = [
+        {
+          type: "text",
+          text: `Jesteś ekspertem od analizy prezentacji. Poniżej ${slides.length} unikalnych slajdów z nagrania spotkania.
+Każdy slajd pojawił się po raz pierwszy w podanym timestampie.
+
+## ZADANIE
+Dla każdego slajdu:
+1. Podaj **tytuł** slajdu
+2. Opisz **pełną treść**: bullet pointy, dane liczbowe, wykresy, tabele, diagramy
+3. Wyciągnij **kluczowe informacje** (liczby, nazwy, daty, wnioski)
+4. Krótko opisz **kontekst** slajdu w prezentacji (np. "agenda", "wyniki Q1", "plan działań")
+
+Kolejność: chronologicznie, zgodnie z timestampami.`,
         },
         ...imageParts,
       ];
 
-      const classifyResult = await callAI(classifyParts, [{
+      const descResult = await callAI(describeParts, [{
         type: "function",
         function: {
-          name: "classify_frames",
-          description: "Classify which frames contain presentation slides",
+          name: "save_slide_descriptions",
+          description: "Save detailed descriptions of unique presentation slides",
           parameters: {
             type: "object",
             properties: {
-              classifications: {
+              slides: {
                 type: "array",
                 items: {
                   type: "object",
                   properties: {
-                    index: { type: "number", description: "0-based index of the frame" },
-                    is_slide: { type: "boolean", description: "Whether this frame shows a presentation slide" },
-                    reason: { type: "string", description: "Short reason for classification" },
-                  },
-                  required: ["index", "is_slide", "reason"],
-                  additionalProperties: false,
-                },
-              },
-              total_slides: { type: "number", description: "Total number of frames classified as slides" },
-            },
-            required: ["classifications", "total_slides"],
-            additionalProperties: false,
-          },
-        },
-      }], { type: "function", function: { name: "classify_frames" } });
-
-      console.log(`AI classified: ${classifyResult.total_slides} slides out of ${frames.length} frames`);
-
-      // Filter only frames classified as slides
-      const slideFrames = uniqueFrames.filter((_, i) => {
-        const c = classifyResult.classifications?.find((cl: any) => cl.index === i);
-        return c?.is_slide === true;
-      });
-
-      console.log(`Final slide count: ${slideFrames.length}`);
-
-      const frameData = slideFrames.map(f => ({
-        path: f.path,
-        timestamp: f.timestamp,
-        timestamp_formatted: `${Math.floor(f.timestamp / 60)}:${String(f.timestamp % 60).padStart(2, "0")}`,
-      }));
-      await saveAnalysis("unique-frames", {
-        frames: frameData,
-        total_unique: frameData.length,
-        total_before_classification: uniqueFrames.length,
-        classifications: classifyResult.classifications,
-      });
-      results.uniqueFrames = { frames: frameData, total_unique: frameData.length, total_before_classification: uniqueFrames.length };
-    }
-
-    // ========== CAPTIONS + SLIDE CONTENT OCR ==========
-    if (selectedMode === "captions") {
-      console.log("Running CAPTIONS + SLIDE CONTENT OCR...");
-      // Load unique frames
-      let uniqueFrames: { path: string; timestamp: number }[];
-      const savedFrames = await loadLatest("unique-frames") as any;
-      if (savedFrames?.frames) {
-        uniqueFrames = savedFrames.frames.map((f: any) => ({ path: f.path, timestamp: f.timestamp }));
-      } else {
-        uniqueFrames = await loadUniqueFrames();
-      }
-      const frames = await loadFramesForAI(uniqueFrames);
-
-      const captionParts: any[] = [
-        {
-          type: "text",
-          text: `Jesteś ekspertem OCR do analizy klatek z nagrań spotkań wideo (Teams/Zoom).
-
-Poniżej ${frames.length} klatek z nagrania spotkania biznesowego.
-
-## ZADANIE 1: DIALOGI (napisy/live captions)
-Na każdej klatce szukaj **napisów/subtitles** — tekst w **dolnej części ekranu** na **czarnym/ciemnym tle** (live captions).
-- Odczytaj tekst z paska napisów
-- Zidentyfikuj mówcę (jeśli widoczne imię/nazwa)
-- Połącz fragmenty w spójne zdania
-- Pomiń duplikaty
-
-## ZADANIE 2: TREŚĆ SLAJDÓW/PREZENTACJI
-Dla każdej klatki przeanalizuj **główną część ekranu** (prezentację/slajd):
-- Odczytaj tytuł slajdu
-- Opisz PEŁNĄ treść: bullet pointy, dane liczbowe, wykresy, tabele, diagramy
-- Zanotuj co się zmieniło vs poprzednia klatka (nowy slajd? ta sama treść?)
-
-## FORMAT
-Zwróć ZARÓWNO dialogi jak i opisy slajdów.
-
-Poniżej klatki:`,
-        },
-        ...buildImageParts(frames),
-      ];
-
-      const captionResult = await callAI(captionParts, [{
-        type: "function",
-        function: {
-          name: "save_ocr_results",
-          description: "Save extracted captions/dialogues AND slide content descriptions",
-          parameters: {
-            type: "object",
-            properties: {
-              transcript: { type: "string", description: "Chronologiczna transkrypcja dialogów. Format: [MM:SS] Mówca: tekst." },
-              entries: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    timestamp: { type: "string" },
-                    speaker: { type: "string" },
-                    text: { type: "string" },
-                  },
-                  required: ["timestamp", "speaker", "text"],
-                  additionalProperties: false,
-                },
-                description: "Dialogi z paska live captions na dole ekranu.",
-              },
-              total_entries: { type: "number" },
-              slide_descriptions: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    timestamp: { type: "string", description: "Timestamp klatki MM:SS" },
+                    timestamp: { type: "string", description: "MM:SS kiedy slajd pojawił się pierwszy raz" },
                     slide_title: { type: "string", description: "Tytuł slajdu" },
-                    slide_content: { type: "string", description: "Pełna treść slajdu: bullet pointy, dane, tabele" },
-                    is_new_slide: { type: "boolean", description: "Czy to nowy slajd vs poprzedni" },
+                    content: { type: "string", description: "Pełna treść slajdu: bullet pointy, dane, tabele" },
+                    key_info: { type: "string", description: "Kluczowe informacje: liczby, wnioski" },
+                    context: { type: "string", description: "Kontekst w prezentacji" },
                   },
-                  required: ["timestamp", "slide_title", "slide_content", "is_new_slide"],
+                  required: ["timestamp", "slide_title", "content", "key_info", "context"],
                   additionalProperties: false,
                 },
-                description: "Opisy treści slajdów/prezentacji z głównej części ekranu.",
               },
-              speakers_identified: {
-                type: "array",
-                items: { type: "string" },
-                description: "Lista zidentyfikowanych mówców (pełne imiona z live captions).",
-              },
+              presentation_summary: { type: "string", description: "Krótkie podsumowanie całej prezentacji" },
             },
-            required: ["transcript", "entries", "total_entries", "slide_descriptions", "speakers_identified"],
+            required: ["slides", "presentation_summary"],
             additionalProperties: false,
           },
         },
-      }], { type: "function", function: { name: "save_ocr_results" } });
+      }], { type: "function", function: { name: "save_slide_descriptions" } });
 
-      console.log(`OCR: ${captionResult.total_entries} dialog entries, ${captionResult.slide_descriptions?.length ?? 0} slide descriptions`);
-      await saveAnalysis("captions-ocr", captionResult);
-      results.captions = captionResult;
+      console.log(`Described ${descResult.slides?.length ?? 0} slides`);
+      await saveAnalysis("slide-descriptions", descResult);
+      results.slideDescriptions = descResult;
     }
 
-    // ========== AGGREGATION (captions + audio) ==========
+    // ========== AGGREGATE (captions + audio + slides) ==========
     if (selectedMode === "aggregate") {
       console.log("Running AGGREGATION...");
 
       const captionSource = await loadLatest("captions-ocr") as any;
       if (!captionSource) {
-        throw { status: 400, message: "Missing captions — run captions OCR first" };
+        throw { status: 400, message: "Missing captions — run OCR captions first" };
       }
+
+      const slideDescs = await loadLatest("slide-descriptions") as any;
 
       const { data: transcriptLines } = await supabase
         .from("transcript_lines")
@@ -406,16 +516,12 @@ Poniżej klatki:`,
         ? transcriptLines.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
         : null;
 
-      // Build slide descriptions text
-      const slideDescs = captionSource.slide_descriptions as any[] | undefined;
-      const slideDescText = slideDescs && slideDescs.length > 0
-        ? slideDescs
-            .filter((s: any) => s.is_new_slide !== false)
-            .map((s: any) => `[${s.timestamp}] 📊 ${s.slide_title}: ${s.slide_content}`)
+      const slideDescText = slideDescs?.slides?.length > 0
+        ? slideDescs.slides
+            .map((s: any) => `[${s.timestamp}] 📊 ${s.slide_title}: ${s.content}`)
             .join("\n")
         : null;
 
-      // Build OCR dialog entries for line-by-line comparison
       const ocrEntries = captionSource.entries as any[] | undefined;
       const ocrDialogText = ocrEntries && ocrEntries.length > 0
         ? ocrEntries.map((e: any) => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n")
@@ -431,7 +537,8 @@ ${audioTranscript.slice(0, 20000)}` : "## ŹRÓDŁO 1: Brak transkryptu audio"}
 Timestampy odpowiadają momentom pojawienia się klatki.
 ${ocrDialogText}
 
-${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (treść prezentacji odczytana z klatek)
+${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (treść prezentacji)
+Każdy slajd podany z timestampem pierwszego pojawienia się.
 ${slideDescText}` : ""}
 
 ## ZADANIE — AGREGACJA LINIA PO LINII
@@ -441,7 +548,7 @@ Idź chronologicznie przez transkrypt audio (ŹRÓDŁO 1) i dla każdej linii:
 1. **Znajdź odpowiednik w OCR** (ŹRÓDŁO 2) po zbliżonym timestampie (±30s tolerancji)
 2. **Porównaj treść** obu wersji tej samej wypowiedzi:
    - Jeśli audio jest poprawne i zrozumiałe → zostaw audio bez zmian
-   - Jeśli OCR ma lepszą/pełniejszą wersję (np. audio źle rozpoznało słowo) → użyj wersji OCR
+   - Jeśli OCR ma lepszą/pełniejszą wersję → użyj wersji OCR
    - Jeśli OCR ma imię mówcy a audio ma "Mówca"/"unknown" → użyj imienia z OCR
 3. **Slajdy** — w odpowiednich momentach wstaw znacznik 📊 z opisem slajdu (ŹRÓDŁO 3)
 4. **NIE generuj nowych wypowiedzi** — tylko koryguj istniejące na podstawie porównania
