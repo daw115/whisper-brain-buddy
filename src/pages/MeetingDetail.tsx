@@ -158,6 +158,7 @@ export default function MeetingDetail() {
                       >
                         <Download className="w-3.5 h-3.5" /> Download
                       </a>
+                      <AudioConverter recordingUrl={recordingUrl} filename={meeting.recording_filename!} />
                     </>
                   )}
                 </div>
