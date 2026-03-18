@@ -1,8 +1,9 @@
 import { useState, useRef } from "react";
-import { FileAudio, Loader2, Wifi, WifiOff } from "lucide-react";
+import { FileAudio, Loader2, Wifi, WifiOff, Languages } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
+import { TRANSCRIPTION_LANGUAGES, type TranscriptionLanguage } from "@/components/AudioExtractor";
 
 interface Props {
   meetingId: string;
