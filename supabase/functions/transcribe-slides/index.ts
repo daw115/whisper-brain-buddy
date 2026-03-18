@@ -329,27 +329,39 @@ Poniżej klatki:`,
             .join("\n")
         : null;
 
-      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz dane z tego samego spotkania:
+      // Build OCR dialog entries for line-by-line comparison
+      const ocrEntries = captionSource.entries as any[] | undefined;
+      const ocrDialogText = ocrEntries && ocrEntries.length > 0
+        ? ocrEntries.map((e: any) => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n")
+        : captionSource.transcript || "Brak";
 
-${audioTranscript ? `## ŹRÓDŁO 1 (BAZA): TRANSKRYPT AUDIO (Web Speech API / Whisper)
+      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz dane z tego samego spotkania z dwóch niezależnych źródeł + opisy slajdów.
+
+${audioTranscript ? `## ŹRÓDŁO 1 (BAZA): TRANSKRYPT AUDIO (Whisper/Gemini STT)
+Timestampy są ciągłe od początku do końca nagrania.
 ${audioTranscript.slice(0, 20000)}` : "## ŹRÓDŁO 1: Brak transkryptu audio"}
 
-## ŹRÓDŁO 2: DIALOGI Z NAPISÓW (OCR z paska live captions na dole ekranu)
-${captionSource.transcript || "Brak"}
+## ŹRÓDŁO 2: DIALOGI OCR (odczytane z paska live captions na dole ekranu)
+Timestampy odpowiadają momentom pojawienia się klatki.
+${ocrDialogText}
 
 ${slideDescText ? `## ŹRÓDŁO 3: OPISY SLAJDÓW (treść prezentacji odczytana z klatek)
 ${slideDescText}` : ""}
 
-## ZADANIE
-Stwórz zagregowaną transkrypcję w formie DIALOGÓW:
+## ZADANIE — AGREGACJA LINIA PO LINII
 
-1. **Bazą jest transkrypt audio** (ŹRÓDŁO 1) — zachowaj jego strukturę dialogową
-2. **Korekta na podstawie OCR** — porównaj czasy z napisami (ŹRÓDŁO 2). Jeśli OCR pokazuje inny tekst niż audio w tym samym momencie, popraw błędy rozpoznawania mowy. Jeśli audio jest poprawne — NIE zmieniaj.
-3. **Mówcy** — uzupełnij nazwy mówców z live captions (OCR ma pełne imiona). Zamień "unknown"/"Mówca" na właściwe imię jeśli OCR je pokazuje.
-4. **Opisy slajdów** — wstaw opisy slajdów (ŹRÓDŁO 3) jako znaczniki 📊 w odpowiednich momentach chronologicznie MIĘDZY dialogami (nie jako obrazki, tylko tekst opisowy).
-5. **NIE dodawaj nic od siebie** — nie generuj nowych wypowiedzi, tylko koryguj istniejące.
+Idź chronologicznie przez transkrypt audio (ŹRÓDŁO 1) i dla każdej linii:
 
-Format:
+1. **Znajdź odpowiednik w OCR** (ŹRÓDŁO 2) po zbliżonym timestampie (±30s tolerancji)
+2. **Porównaj treść** obu wersji tej samej wypowiedzi:
+   - Jeśli audio jest poprawne i zrozumiałe → zostaw audio bez zmian
+   - Jeśli OCR ma lepszą/pełniejszą wersję (np. audio źle rozpoznało słowo) → użyj wersji OCR
+   - Jeśli OCR ma imię mówcy a audio ma "Mówca"/"unknown" → użyj imienia z OCR
+3. **Slajdy** — w odpowiednich momentach wstaw znacznik 📊 z opisem slajdu (ŹRÓDŁO 3)
+4. **NIE generuj nowych wypowiedzi** — tylko koryguj istniejące na podstawie porównania
+5. **NIE usuwaj linii** z audio — każda linia powinna mieć odpowiednik w wyniku
+
+Format wyniku:
 [MM:SS] Mówca: wypowiedź
 [MM:SS] 📊 SLAJD: "Tytuł" — opis treści slajdu`;
 
