@@ -468,7 +468,7 @@ export default function AudioExtractor({
           }
           const base64 = uint8ToBase64(bytes);
           const { data, error } = await supabase.functions.invoke("transcribe-audio", {
-            body: { audioBase64: base64, mimeType: "audio/mpeg", language },
+            body: { audioBase64: base64, mimeType: "audio/mpeg", language, frames: cachedFrames.length > 0 ? cachedFrames : undefined },
           });
           if (error) { console.error(`Seg ${i + 1}:`, error); continue; }
           if (data?.error) { console.error(`Seg ${i + 1}:`, data.error); toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" }); continue; }
