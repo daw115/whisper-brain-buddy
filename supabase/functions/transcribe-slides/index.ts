@@ -172,98 +172,64 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // ========== STEP 3: CROP-SPLIT (batched) ==========
+    // ========== STEP 3: DEDUPLICATE FRAMES (batched, no image decoding) ==========
     if (selectedMode === "crop-split") {
-      console.log(`Step 3: Crop-split batch offset=${batchOffset} size=${batchSize}...`);
+      console.log(`Step 3: Deduplicate frames batch offset=${batchOffset} size=${batchSize}...`);
       const framePaths = await collectFramePaths();
       const totalFrames = framePaths.length;
 
-      // On first batch (offset 0): detect caption bar, clean previous data
-      let captionBarY: number;
-      let imageWidth: number;
-      let imageHeight: number;
-
-      // Download first frame to detect caption bar height (always needed)
-      const { data: firstBlob } = await supabaseAdmin.storage.from("recordings").download(framePaths[0].path);
-      if (!firstBlob) throw { status: 500, message: "Cannot download first frame" };
-      const firstBytes = new Uint8Array(await firstBlob.arrayBuffer());
-      const firstDecoded = decodeJpeg(firstBytes, { useTArray: true, formatAsRGBA: true });
-      captionBarY = detectCaptionBarY(firstDecoded.data, firstDecoded.width, firstDecoded.height);
-      imageWidth = firstDecoded.width;
-      imageHeight = firstDecoded.height;
-
       // Load existing hashes from previous batches (for cross-batch dedup)
       const prevData = batchOffset > 0 ? await loadLatest("crop-split") as any : null;
-      const seenSlideHashes = new Map<string, number>();
-      const existingSlides: any[] = prevData?.unique_slides ?? [];
-      const existingCaptions: any[] = prevData?.caption_crops ?? [];
-      // Rebuild hash set from existing slide paths (hash stored in filename)
+      const seenHashes = new Map<string, number>();
+      const existingUniqueFrames: any[] = prevData?.unique_slides ?? [];
       if (prevData?.slide_hashes) {
         for (const [h, ts] of Object.entries(prevData.slide_hashes)) {
-          seenSlideHashes.set(h, ts as number);
+          seenHashes.set(h, ts as number);
         }
       }
 
-      const stem = meeting.recording_filename!.replace(/\.[^.]+$/, "");
-      const slidesDir = `${meeting.user_id}/crops/${stem}/slides`;
-      const captionsDir = `${meeting.user_id}/crops/${stem}/captions`;
-
       const batchFrames = framePaths.slice(batchOffset, batchOffset + batchSize);
-      const newSlides: typeof existingSlides = [];
-      const newCaptions: typeof existingCaptions = [];
+      const newUnique: any[] = [];
       let processedCount = 0;
 
       for (const frame of batchFrames) {
         const { data: blob } = await supabaseAdmin.storage.from("recordings").download(frame.path);
         if (!blob) continue;
         const bytes = new Uint8Array(await blob.arrayBuffer());
-
-        const { slideJpeg, captionJpeg } = cropFrame(bytes, captionBarY);
         const tsFormatted = formatTs(frame.timestamp);
 
-        // Upload caption crop (always)
-        const captionPath = `${captionsDir}/caption_${tsFormatted.replace(":", "_")}.jpg`;
-        await supabaseAdmin.storage.from("recordings").upload(captionPath, captionJpeg, {
-          contentType: "image/jpeg", upsert: true,
-        });
-        newCaptions.push({ path: captionPath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
-
-        // Dedup slides by hash
-        const slideHash = hashSlideBytes(slideJpeg);
-        if (!seenSlideHashes.has(slideHash)) {
-          seenSlideHashes.set(slideHash, frame.timestamp);
-          const slidePath = `${slidesDir}/slide_${tsFormatted.replace(":", "_")}.jpg`;
-          await supabaseAdmin.storage.from("recordings").upload(slidePath, slideJpeg, {
-            contentType: "image/jpeg", upsert: true,
-          });
-          newSlides.push({ path: slidePath, timestamp: frame.timestamp, ts_formatted: tsFormatted });
+        // Dedup by raw byte hash (no decode needed)
+        const frameHash = hashFrameBytes(bytes);
+        if (!seenHashes.has(frameHash)) {
+          seenHashes.set(frameHash, frame.timestamp);
+          newUnique.push({ path: frame.path, timestamp: frame.timestamp, ts_formatted: tsFormatted });
         }
-
         processedCount++;
       }
 
-      const allSlides = [...existingSlides, ...newSlides];
-      const allCaptions = [...existingCaptions, ...newCaptions];
+      const allUnique = [...existingUniqueFrames, ...newUnique];
       const totalProcessed = batchOffset + processedCount;
       const hasMore = totalProcessed < totalFrames;
 
       // Serialize hashes for cross-batch dedup
       const slideHashesObj: Record<string, number> = {};
-      seenSlideHashes.forEach((ts, h) => { slideHashesObj[h] = ts; });
+      seenHashes.forEach((ts, h) => { slideHashesObj[h] = ts; });
 
-      console.log(`Crop-split batch done: ${processedCount} frames (${totalProcessed}/${totalFrames}), ${allSlides.length} unique slides total`);
+      console.log(`Dedup batch done: ${processedCount} frames (${totalProcessed}/${totalFrames}), ${allUnique.length} unique total`);
+
+      // All frames are also caption sources (Gemini will read captions from full frames)
+      const allFrameRefs = [
+        ...(prevData?.caption_crops ?? []),
+        ...batchFrames.map(f => ({ path: f.path, timestamp: f.timestamp, ts_formatted: formatTs(f.timestamp) })),
+      ];
 
       const cropData = {
-        caption_bar_y: captionBarY,
-        image_height: imageHeight,
-        image_width: imageWidth,
-        caption_bar_percent: Math.round((1 - captionBarY / imageHeight) * 100),
-        unique_slides: allSlides,
-        caption_crops: allCaptions,
+        unique_slides: allUnique,
+        caption_crops: allFrameRefs,
         slide_hashes: slideHashesObj,
         total_frames: totalProcessed,
-        total_unique_slides: allSlides.length,
-        total_captions: allCaptions.length,
+        total_unique_slides: allUnique.length,
+        total_captions: allFrameRefs.length,
         has_more: hasMore,
         next_offset: hasMore ? totalProcessed : null,
         frames_total: totalFrames,
