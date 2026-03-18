@@ -226,6 +226,7 @@ export default function MeetingDetail() {
                   <FrameRegenerator
                     recordingUrl={recordingUrl}
                     recordingFilename={meeting.recording_filename}
+                    onComplete={() => setFramesVersion((v) => v + 1)}
                   />
                 </div>
               )}
