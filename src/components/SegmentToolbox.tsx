@@ -845,7 +845,7 @@ export default function SegmentToolbox({
         </div>
 
         {/* Progress for video tools */}
-        {(phase === "extracting-mp3" || phase === "batch-frames") && batchProgress.total > 0 && (
+        {(phase === "extracting-mp3" || phase === "batch-frames" || phase === "splitting-video") && batchProgress.total > 0 && (
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{phase === "extracting-mp3" ? "Wyodrębnianie MP3" : "Generowanie klatek"} {batchProgress.current}/{batchProgress.total}</span>
