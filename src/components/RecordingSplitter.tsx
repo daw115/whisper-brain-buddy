@@ -153,7 +153,7 @@ export default function RecordingSplitter({ recordingUrl, recordingFilename, rec
 
         const partFilename = `${stem}_part${i + 1}${ext}`;
         const path = `${user.id}/${partFilename}`;
-        const partBlob = new Blob([parts[i].data.buffer], { type: blob.type || "video/webm" });
+        const partBlob = new Blob([new Uint8Array(parts[i].data) as any], { type: blob.type || "video/webm" });
 
         toast.loading(`Przesyłanie części ${i + 1}/${parts.length}…`, { id: "split" });
 
