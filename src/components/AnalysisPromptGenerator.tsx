@@ -129,46 +129,69 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   }
 
   function buildPrompt(): string {
-    const hasIntegrated = !!integratedTranscript;
+    const hasAudio = !!audioTranscript;
+    const hasOcr = !!ocrCaptions;
+    const hasSlideDesc = !!slideDescriptions;
 
     return `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
 
 ## DANE WEJŚCIOWE
-${hasIntegrated ? "- Zagregowana transkrypcja chronologiczna (dialogi uczestników połączone z audio przez AI)" : "- Brak zagregowanej transkrypcji — przeanalizuj załączone materiały"}
-${uniqueFrames.length > 0 ? `- ${uniqueFrames.length} obrazów slajdów prezentacji (unikalne klatki)` : ""}
+${hasAudio ? `- Transkrypt AUDIO (Whisper STT) — pełna ~50-minutowa rozmowa z timestampami` : "- Brak transkryptu audio"}
+${hasOcr ? `- Dialogi OCR — odczytane z paska live captions (z IMIONAMI mówców)` : ""}
+${hasSlideDesc ? `- Opisy slajdów prezentacji z timestampami` : ""}
+${uniqueFrames.length > 0 ? `- ${uniqueFrames.length} obrazów slajdów prezentacji (unikalne klatki w archiwum ZIP)` : ""}
 
-${hasIntegrated ? `## ZAGREGOWANA TRANSKRYPCJA
-Poniższa transkrypcja łączy dialogi uczestników (odczytane z napisów live captions) z transkryptem audio w kolejności chronologicznej.
+## GŁÓWNE ZADANIE: AGREGACJA TRANSKRYPCJI + ANALIZA
 
+Musisz wykonać dwa zadania:
+
+### ZADANIE 1: ZAGREGOWANA TRANSKRYPCJA ROZMOWY (conversation_transcript)
+Idź chronologicznie przez CAŁY transkrypt audio — KAŻDA linia musi trafić do wyniku.
+Dla każdej linii:
+1. **Identyfikuj mówcę** — znajdź odpowiednik w OCR (±30s tolerancji) i użyj IMIENIA mówcy zamiast "Mówca"/"unknown"/"Speaker"
+2. **Popraw błędy** — jeśli OCR ma lepszą/poprawniejszą wersję słowa lub frazy, użyj jej
+3. **Zachowaj PEŁNĄ długość** — NIE skracaj, NIE pomijaj, NIE streszczaj. Cała ~50-minutowa rozmowa musi być w wyniku
+4. **NIE generuj nowych wypowiedzi** — tylko koryguj istniejące
+5. **NIE wstawiaj slajdów** w tej sekcji — slajdy idą w sekcji 2
+
+Format linii: [MM:SS] Imię: wypowiedź
+
+### ZADANIE 2: SLAJDY I ICH PODSUMOWANIA (slides_section)
+Pod transkrypcją, umieść sekcję ze WSZYSTKIMI slajdami.
+Dla każdego slajdu podaj:
+- Timestamp pierwszego pojawienia się
+- Tytuł slajdu
+- Pełny opis treści (bullet pointy, dane, wykresy)
+- Krótkie podsumowanie merytoryczne
+${uniqueFrames.length > 0 ? `- Odczytaj dodatkowe dane z załączonych OBRAZÓW slajdów` : ""}
+
+Format: 📊 [MM:SS] "Tytuł" — opis i podsumowanie
+
+${hasAudio ? `## ŹRÓDŁO 1: TRANSKRYPT AUDIO
 ---
-${integratedTranscript!.slice(0, 25000)}
+${audioTranscript}
+---` : ""}
+
+${hasOcr ? `## ŹRÓDŁO 2: DIALOGI OCR (z live captions)
+---
+${ocrCaptions}
+---` : ""}
+
+${hasSlideDesc ? `## ŹRÓDŁO 3: OPISY SLAJDÓW
+---
+${slideDescriptions}
 ---` : ""}
 
 ${uniqueFrames.length > 0 ? `## ZAŁĄCZONE OBRAZY SLAJDÓW
-W archiwum ZIP znajduje się ${uniqueFrames.length} unikalnych obrazów slajdów prezentacji.
-Dla KAŻDEGO slajdu:
-1. Odczytaj CAŁĄ treść: tytuły, bullet pointy, dane liczbowe, wykresy, tabele
-2. Zweryfikuj dane z transkrypcji — wyłap szczegóły nieujęte w tekście
-3. Powiąż treść slajdu z odpowiednim momentem dialogu` : ""}
-
-## ZADANIA
-1. Przeanalizuj przebieg spotkania na podstawie transkrypcji i slajdów
-2. Dla KAŻDEGO slajdu: opisz treść, kontekst dyskusji, wnioski
-3. Wyciągnij decyzje, zadania i podsumowanie
-4. Zidentyfikuj rozbieżności między slajdami a dialogiem
-5. Wyłap kontekst ukryty — informacje z dialogu których NIE MA na slajdach
-
-## SZCZEGÓLNY NACISK NA
-- **Analiza slajdów**: Każdy slajd = osobny insight z pełną treścią + kontekstem dialogu
-- **Dane liczbowe**: WSZYSTKIE liczby, procenty, kwoty ze slajdów i dialogu
-- **Rozbieżności**: Co mówiono innego niż jest na slajdach
-- **Kontekst ukryty**: Decyzje ustne, komentarze, background niewidoczny na slajdach
+W archiwum ZIP znajduje się ${uniqueFrames.length} unikalnych obrazów slajdów.
+Odczytaj z nich WSZYSTKIE dane: tytuły, bullet pointy, wykresy, tabele, liczby.` : ""}
 
 ## FORMAT WYNIKU
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
   "summary": "Kompletne podsumowanie 3-6 zdań po polsku.",
-  "integrated_transcript": "ZINTEGROWANY chronologiczny zapis spotkania z wstawionymi slajdami.",
+  "conversation_transcript": "PEŁNA transkrypcja rozmowy z poprawionymi mówcami. [MM:SS] Imię: tekst...",
+  "slides_section": "📊 [MM:SS] Tytuł — opis i podsumowanie każdego slajdu",
   "sentiment": "pozytywny | neutralny | negatywny | mieszany",
   "participants": ["Imię Nazwisko"],
   "tags": ["temat1", "temat2"],
@@ -182,17 +205,19 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
     "discussion_context": "Co mówili uczestnicy",
     "extra_context": "Info z dialogu niewidoczne na slajdzie",
     "discrepancies": "Rozbieżności"
-  }]
+  }],
+  "speakers": ["Imię Nazwisko"],
+  "slide_markers": [{ "timestamp": "MM:SS", "slide_title": "Tytuł", "slide_summary": "Podsumowanie" }]
 }
 
 ## ZASADY
-1. Zidentyfikuj mówców po kontekście — użyj pełnych imion
-2. Action items = konkretne zadania z właścicielem
-3. Decisions = wyraźnie podjęte decyzje
-4. Summary = zwięzłe, z danymi liczbowymi, po polsku
-5. Tags = główne tematy (max 7)
-6. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu
-7. integrated_transcript = poprawiona wersja transkrypcji z wstawionymi slajdami`;
+1. conversation_transcript = PEŁNA rozmowa (~50 min), KAŻDA linia z audio z poprawionym mówcą
+2. slides_section = osobna sekcja ze WSZYSTKIMI slajdami i ich podsumowaniami
+3. Action items = konkretne zadania z właścicielem
+4. Decisions = wyraźnie podjęte decyzje
+5. Summary = zwięzłe, z danymi liczbowymi, po polsku
+6. Tags = główne tematy (max 7)
+7. Slide insights = SZCZEGÓŁOWA analiza KAŻDEGO slajdu z korelacją do dialogu`;
   }
 
   function handleCopy() {
