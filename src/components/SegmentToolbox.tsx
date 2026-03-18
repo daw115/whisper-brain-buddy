@@ -266,7 +266,7 @@ export default function SegmentToolbox({
           await ffmpeg.exec(["-i", "autosplit_input.mp3", "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
           if (durationSec <= 0) durationSec = Math.max(60, mp3Blob.size / (8 * 1024));
 
-          const chunkBytes = maxSegmentMB * 1024 * 1024;
+          const chunkBytes = maxMp3MB * 1024 * 1024;
           const bytesPerSec = mp3Blob.size / durationSec;
           const segDuration = Math.max(10, Math.floor(chunkBytes / bytesPerSec));
 
