@@ -9,7 +9,6 @@ import AIChatPanel from "@/components/AIChatPanel";
 import AnalysisPromptGenerator from "@/components/AnalysisPromptGenerator";
 import AnalysisJsonImporter from "@/components/AnalysisJsonImporter";
 import AudioConverter from "@/components/AudioConverter";
-import AIAnalysisButton from "@/components/AIAnalysisButton";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -173,19 +172,10 @@ export default function MeetingDetail() {
             </>
           )}
 
-          {/* AI Analysis */}
-          <div className="mt-6 pt-4 border-t border-border">
-            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Automatyczna analiza</h2>
-            <AIAnalysisButton
-              meetingId={meeting.id}
-              hasTranscript={!!(meeting.transcript_lines && meeting.transcript_lines.length > 0)}
-              hasFrames={!!meeting.recording_filename}
-            />
-          </div>
 
           {/* Analysis Prompt Generator */}
           <div className="mt-6 pt-4 border-t border-border">
-            <AnalysisPromptGenerator meeting={meeting} />
+            <AnalysisPromptGenerator meeting={meeting} recordingUrl={recordingUrl} />
           </div>
 
           {/* Analysis JSON Importer */}
