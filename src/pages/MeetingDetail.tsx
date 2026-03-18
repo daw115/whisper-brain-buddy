@@ -246,6 +246,7 @@ export default function MeetingDetail() {
                     recordingFilename={meeting.recording_filename}
                     recordingSizeBytes={meeting.recording_size_bytes}
                     meetingId={meeting.id}
+                    onTranscriptGenerated={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
                   />
                 </div>
               )}

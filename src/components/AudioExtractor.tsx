@@ -32,9 +32,10 @@ interface Props {
   recordingSizeBytes?: number | null;
   meetingId: string;
   onAudioReady?: (segments: { url: string; name: string }[]) => void;
+  onTranscriptGenerated?: () => void;
 }
 
-type Phase = "idle" | "downloading" | "converting" | "uploading" | "splitting" | "uploading-parts";
+type Phase = "idle" | "downloading" | "converting" | "uploading" | "splitting" | "uploading-parts" | "batch-transcribing";
 
 const phaseLabels: Record<Phase, string> = {
   idle: "",
@@ -43,6 +44,7 @@ const phaseLabels: Record<Phase, string> = {
   uploading: "Przesyłanie MP3 na serwer…",
   splitting: "Dzielenie MP3 na części…",
   "uploading-parts": "Przesyłanie części…",
+  "batch-transcribing": "Transkrypcja segmentów…",
 };
 
 export default function AudioExtractor({
@@ -51,6 +53,7 @@ export default function AudioExtractor({
   recordingSizeBytes,
   meetingId,
   onAudioReady,
+  onTranscriptGenerated,
 }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
@@ -61,6 +64,7 @@ export default function AudioExtractor({
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [splitProgress, setSplitProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const ffmpegRef = useRef<any>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
@@ -340,6 +344,109 @@ export default function AudioExtractor({
     }
   }
 
+  async function handleBatchTranscribe() {
+    const segsWithUrl = audioSegments.filter((s) => s.signedUrl);
+    if (segsWithUrl.length === 0) {
+      toast.info("Brak segmentów audio do transkrypcji");
+      return;
+    }
+
+    setPhase("batch-transcribing");
+    setBatchProgress({ current: 0, total: segsWithUrl.length });
+
+    // First delete existing transcript lines for this meeting
+    await supabase.from("transcript_lines").delete().eq("meeting_id", meetingId);
+
+    let allLines: { timestamp: string; speaker: string; text: string }[] = [];
+    let globalLineOrder = 0;
+
+    for (let i = 0; i < segsWithUrl.length; i++) {
+      const seg = segsWithUrl[i];
+      setBatchProgress({ current: i + 1, total: segsWithUrl.length });
+      toast.loading(`Transkrypcja segmentu ${i + 1}/${segsWithUrl.length}…`, { id: "batch-transcribe" });
+
+      try {
+        // Download segment and convert to base64
+        const res = await fetch(seg.signedUrl!);
+        const blob = await res.blob();
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+
+        const sizeMB = bytes.length / (1024 * 1024);
+        if (sizeMB > 20) {
+          toast.warning(`Segment ${i + 1} za duży (${sizeMB.toFixed(1)} MB) — pominięto`, { id: "batch-transcribe" });
+          continue;
+        }
+
+        const base64 = uint8ToBase64(bytes);
+
+        const { data, error } = await supabase.functions.invoke("transcribe-audio", {
+          body: { audioBase64: base64, mimeType: "audio/mpeg", language },
+        });
+
+        if (error) {
+          console.error(`Segment ${i + 1} error:`, error);
+          toast.warning(`Segment ${i + 1}: ${error.message || "błąd"}`, { id: "batch-transcribe" });
+          continue;
+        }
+        if (data?.error) {
+          console.error(`Segment ${i + 1} AI error:`, data.error);
+          toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" });
+          continue;
+        }
+
+        const lines = (data?.lines || []).map((l: any) => ({
+          timestamp: l.timestamp || "00:00",
+          speaker: l.speaker || "Mówca",
+          text: l.text,
+        })).filter((l: any) => l.text?.trim());
+
+        // Save lines to DB immediately
+        if (lines.length > 0) {
+          const rows = lines.map((line: any) => ({
+            meeting_id: meetingId,
+            timestamp: line.timestamp,
+            speaker: line.speaker,
+            text: line.text,
+            line_order: globalLineOrder++,
+          }));
+
+          const { error: insertError } = await supabase.from("transcript_lines").insert(rows);
+          if (insertError) {
+            console.error(`Segment ${i + 1} insert error:`, insertError);
+          }
+          allLines.push(...lines);
+        }
+
+        // Small delay to avoid rate limiting
+        if (i < segsWithUrl.length - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      } catch (err: any) {
+        console.error(`Segment ${i + 1} exception:`, err);
+        toast.warning(`Segment ${i + 1}: ${err.message || "błąd"}`, { id: "batch-transcribe" });
+      }
+    }
+
+    // Update meeting summary
+    if (allLines.length > 0) {
+      const fullText = allLines.map((l) => l.text).join(" ");
+      await supabase.from("meetings").update({ summary: fullText.slice(0, 500) }).eq("id", meetingId);
+    }
+
+    setPhase("idle");
+    setBatchProgress({ current: 0, total: 0 });
+
+    if (allLines.length > 0) {
+      toast.success(`Transkrypcja zakończona — ${allLines.length} fragmentów z ${segsWithUrl.length} segmentów`, {
+        id: "batch-transcribe",
+        duration: 5000,
+      });
+      onTranscriptGenerated?.();
+    } else {
+      toast.warning("Nie udało się transkrybować żadnego segmentu", { id: "batch-transcribe" });
+    }
+  }
+
   const busy = phase !== "idle";
   const totalMB = recordingSizeBytes ? Math.round(recordingSizeBytes / (1024 * 1024)) : null;
   // Rough MP3 estimate: 64kbps audio from video => ~8KB/s => totalMB * ratio
@@ -537,6 +644,38 @@ export default function AudioExtractor({
                   )}
                 </div>
               ))}
+
+              {/* Batch transcribe button */}
+              <div className="pt-2 border-t border-border">
+                <button
+                  onClick={handleBatchTranscribe}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                >
+                  {phase === "batch-transcribing" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Transkrypcja {batchProgress.current}/{batchProgress.total}…
+                    </>
+                  ) : (
+                    <>
+                      <FileAudio className="w-3.5 h-3.5" />
+                      Transkrybuj wszystkie (Gemini)
+                    </>
+                  )}
+                </button>
+                {phase === "batch-transcribing" && batchProgress.total > 0 && (
+                  <div className="mt-1.5">
+                    <Progress
+                      value={Math.round((batchProgress.current / batchProgress.total) * 100)}
+                      className="h-1.5"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Segment {batchProgress.current} z {batchProgress.total} • język: {TRANSCRIPTION_LANGUAGES.find(l => l.code === language)?.label}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -571,4 +710,14 @@ export default function AudioExtractor({
       )}
     </div>
   );
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }
