@@ -53,6 +53,7 @@ export default function AudioExtractor({
   recordingFilename,
   recordingSizeBytes,
   meetingId,
+  framesVersion = 0,
   onAudioReady,
   onTranscriptGenerated,
 }: Props) {
