@@ -26,10 +26,12 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [mp3Size, setMp3Size] = useState<string | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
   const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
+  const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
 
   useEffect(() => {
     loadFrames();
     loadSlideTranscript();
+    loadIntegratedTranscript();
   }, [meeting.id, meeting.recording_filename, framesVersion]);
 
   async function loadSlideTranscript() {
