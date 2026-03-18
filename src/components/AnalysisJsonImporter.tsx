@@ -50,11 +50,11 @@ export default function AnalysisJsonImporter({ meetingId, onSuccess }: Props) {
       if (!user) throw new Error("Nie zalogowano");
 
       // Save to meeting_analyses as chatgpt source
-      await supabase.from("meeting_analyses").insert({
+      await (supabase as any).from("meeting_analyses").insert({
         meeting_id: meetingId,
         source: "chatgpt",
         analysis_json: parsed,
-      } as any);
+      });
 
       // Invalidate caches
       qc.invalidateQueries({ queryKey: ["meeting", meetingId] });

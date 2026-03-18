@@ -25,7 +25,7 @@ export default function MeetingDetail() {
   const { data: analyses = [], refetch: refetchAnalyses } = useQuery({
     queryKey: ["meeting-analyses", id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data } = await (supabase as any)
         .from("meeting_analyses")
         .select("*")
         .eq("meeting_id", id!)
