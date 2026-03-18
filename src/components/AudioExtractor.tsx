@@ -691,8 +691,36 @@ export default function AudioExtractor({
                 </div>
               ))}
 
-              {/* Batch transcribe button */}
-              <div className="pt-2 border-t border-border">
+              {/* Batch transcribe */}
+              <div className="pt-2 border-t border-border space-y-2">
+                {/* Mode toggle */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setTranscribeMode("offline")}
+                    disabled={busy}
+                    className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                      transcribeMode === "offline"
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <WifiOff className="w-3 h-3" />
+                    Whisper (offline)
+                  </button>
+                  <button
+                    onClick={() => setTranscribeMode("online")}
+                    disabled={busy}
+                    className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                      transcribeMode === "online"
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Wifi className="w-3 h-3" />
+                    Gemini (online)
+                  </button>
+                </div>
+
                 <button
                   onClick={handleBatchTranscribe}
                   disabled={busy}
@@ -706,18 +734,18 @@ export default function AudioExtractor({
                   ) : (
                     <>
                       <FileAudio className="w-3.5 h-3.5" />
-                      Transkrybuj wszystkie (Gemini)
+                      Transkrybuj wszystkie ({transcribeMode === "offline" ? "Whisper" : "Gemini"})
                     </>
                   )}
                 </button>
                 {phase === "batch-transcribing" && batchProgress.total > 0 && (
-                  <div className="mt-1.5">
+                  <div>
                     <Progress
                       value={Math.round((batchProgress.current / batchProgress.total) * 100)}
                       className="h-1.5"
                     />
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Segment {batchProgress.current} z {batchProgress.total} • język: {TRANSCRIPTION_LANGUAGES.find(l => l.code === language)?.label}
+                      Segment {batchProgress.current} z {batchProgress.total} • {transcribeMode === "offline" ? "Whisper" : "Gemini"} • {TRANSCRIPTION_LANGUAGES.find(l => l.code === language)?.label}
                     </p>
                   </div>
                 )}
