@@ -53,6 +53,29 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
     } catch {}
   }
 
+  async function loadIntegratedTranscript() {
+    try {
+      // Try merged first, then gemini
+      for (const src of ["merged", "gemini"]) {
+        const { data } = await supabase
+          .from("meeting_analyses")
+          .select("analysis_json")
+          .eq("meeting_id", meeting.id)
+          .eq("source", src)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data?.analysis_json) {
+          const json = data.analysis_json as any;
+          if (json.integrated_transcript) {
+            setIntegratedTranscript(json.integrated_transcript);
+            return;
+          }
+        }
+      }
+    } catch {}
+  }
+
   async function loadFrames() {
     setLoading(true);
     setFrames([]);
