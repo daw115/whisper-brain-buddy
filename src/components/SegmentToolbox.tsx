@@ -811,22 +811,31 @@ export default function SegmentToolbox({
                 <span className={`text-[10px] font-mono-data ${isOversized ? "text-destructive font-bold" : "text-muted-foreground/60"}`}>{seg.sizeMB} MB</span>
                 {isOversized && (
                   <>
-                    {/* Check if sub-parts exist for this segment */}
                     {videoSegments.some(s => s.name.startsWith(seg.name.replace(/\.[^.]+$/, "") + "_sub")) ? (
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Usunąć oryginał "${seg.name}" (${seg.sizeMB} MB)? Podsegmenty zostaną zachowane.`)) return;
-                          const { error } = await supabase.storage.from("recordings").remove([seg.path]);
-                          if (error) { toast.error("Błąd usuwania: " + error.message); return; }
-                          toast.success("Usunięto oryginał");
-                          await loadVideoSegments();
-                        }}
-                        disabled={busy}
-                        className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-destructive/30 hover:bg-destructive/10"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Usuń oryginał
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleDeleteSubSegments(seg)}
+                          disabled={busy}
+                          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-border hover:border-destructive/30"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Usuń sub
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Usunąć oryginał "${seg.name}" (${seg.sizeMB} MB)? Podsegmenty zostaną zachowane.`)) return;
+                            const { error } = await supabase.storage.from("recordings").remove([seg.path]);
+                            if (error) { toast.error("Błąd usuwania: " + error.message); return; }
+                            toast.success("Usunięto oryginał");
+                            await loadVideoSegments();
+                          }}
+                          disabled={busy}
+                          className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded border border-destructive/30 hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Usuń oryginał
+                        </button>
+                      </div>
                     ) : (
                       <button
                         onClick={() => handleSplitVideoSegment(seg)}
