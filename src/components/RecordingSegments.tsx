@@ -24,6 +24,10 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [expandedFrames, setExpandedFrames] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ segIdx: number; total: number; phase: string; percent: number } | null>(null);
+  const [batchInterval, setBatchInterval] = useState(30);
+  const batchAbortRef = useRef<AbortController | null>(null);
 
   const stem = recordingFilename.replace(/\.[^.]+$/, "");
 
