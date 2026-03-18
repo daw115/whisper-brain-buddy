@@ -11,6 +11,7 @@ interface Props {
 
 export default function FrameRegenerator({ recordingUrl, recordingFilename, onComplete }: Props) {
   const [interval, setInterval] = useState(30);
+  const [customInterval, setCustomInterval] = useState("");
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState("");
 
