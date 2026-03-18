@@ -85,6 +85,7 @@ export function useRecorder(): RecordingState {
     accumulatedSizeRef.current = 0;
     segmentIndexRef.current = 0;
     isSplittingRef.current = false;
+    cumulativeFrameOffsetRef.current = 0;
   }, []);
 
   const extractFramesFromSegment = useCallback(async (blob: Blob, filename: string) => {
