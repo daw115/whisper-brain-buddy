@@ -302,6 +302,8 @@ export default function MeetingDetail() {
             <GeminiAnalysisButton
               meetingId={meeting.id}
               hasFrames={!!meeting.recording_filename}
+              recordingFilename={meeting.recording_filename || undefined}
+              framesVersion={framesVersion}
               onComplete={() => refetchAnalyses()}
             />
           </div>
