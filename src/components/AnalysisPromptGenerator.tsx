@@ -236,8 +236,14 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
       toast.info("Pakuję prompt…");
       zip.file("prompt.txt", buildPrompt());
 
-      if (integratedTranscript) {
-        zip.file("transkrypcja_zagregowana.txt", integratedTranscript);
+      if (audioTranscript) {
+        zip.file("transkrypcja_audio.txt", audioTranscript);
+      }
+      if (ocrCaptions) {
+        zip.file("dialogi_ocr.txt", ocrCaptions);
+      }
+      if (slideDescriptions) {
+        zip.file("opisy_slajdow.txt", slideDescriptions);
       }
 
       if (uniqueFrames.length > 0) {
