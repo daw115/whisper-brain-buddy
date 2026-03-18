@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain, FolderOpen } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Brain, FolderOpen } from "lucide-react";
 import { useMeeting, useCategories } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +17,7 @@ import RecordingSegments from "@/components/RecordingSegments";
 import FrameGallery from "@/components/FrameGallery";
 import TranscribeButton from "@/components/TranscribeButton";
 import AudioExtractor from "@/components/AudioExtractor";
+import RecordingPanel from "@/components/RecordingPanel";
 import { toast } from "sonner";
 
 export default function MeetingDetail() {
@@ -24,7 +25,7 @@ export default function MeetingDetail() {
   const navigate = useNavigate();
   const { data: meeting, isLoading } = useMeeting(id);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
-  const [showPlayer, setShowPlayer] = useState(false);
+  
   const [showChat, setShowChat] = useState(false);
   const [framesVersion, setFramesVersion] = useState(0);
   const [segmentsVersion, setSegmentsVersion] = useState(0);
@@ -186,56 +187,10 @@ export default function MeetingDetail() {
           {meeting.recording_filename && (
             <>
               <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mt-6 mb-3">Recording</h2>
-              {showPlayer && recordingUrl ? (
-                <video
-                  src={recordingUrl}
-                  controls
-                  autoPlay
-                  className="w-full rounded-md border border-border bg-black"
-                />
-              ) : (
-                <div className="flex items-center gap-2 flex-wrap">
-                  {recordingUrl && (
-                    <>
-                      <button
-                        onClick={() => setShowPlayer(true)}
-                        className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                      >
-                        <Play className="w-3.5 h-3.5" /> Play
-                      </button>
-                      <a
-                        href={recordingUrl}
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          try {
-                            const res = await fetch(recordingUrl);
-                            const blob = await res.blob();
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = meeting.recording_filename || "recording.webm";
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            URL.revokeObjectURL(url);
-                          } catch {
-                            window.open(recordingUrl, "_blank");
-                          }
-                        }}
-                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" /> Download
-                      </a>
-                    </>
-                  )}
-                </div>
-              )}
-              <p className="text-xs font-mono-data text-muted-foreground mt-2">{meeting.recording_filename}</p>
-              {meeting.recording_size_bytes && (
-                <p className="text-xs font-mono-data text-muted-foreground/60">
-                  {(meeting.recording_size_bytes / (1024 * 1024)).toFixed(1)} MB
-                </p>
-              )}
+              <RecordingPanel
+                recordingFilename={meeting.recording_filename}
+                recordingSizeBytes={meeting.recording_size_bytes}
+              />
 
               {/* AI Transcription */}
               {recordingUrl && (
@@ -286,7 +241,7 @@ export default function MeetingDetail() {
                 </div>
               )}
 
-              {/* Segments viewer */}
+              {/* Segments viewer (batch processing) */}
               <div className="mt-3 pt-3 border-t border-border">
                 <RecordingSegments
                   key={segmentsVersion}
