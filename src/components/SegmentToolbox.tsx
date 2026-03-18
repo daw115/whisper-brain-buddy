@@ -591,23 +591,12 @@ export default function SegmentToolbox({
       if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
       const inputBytes = new Uint8Array(await blob.arrayBuffer());
 
-      // 1. Get real duration using <video> element (much more reliable than FFmpeg probe for webm)
+      // 1. Get real duration (handles WebM with Infinity duration)
       toast.loading("Odczytywanie czasu trwania…", { id: "split-video" });
       let durationSec = 0;
       try {
-        const videoUrl = URL.createObjectURL(blob);
-        durationSec = await new Promise<number>((resolve, reject) => {
-          const video = document.createElement("video");
-          video.preload = "metadata";
-          video.onloadedmetadata = () => {
-            const dur = video.duration;
-            URL.revokeObjectURL(videoUrl);
-            if (dur && isFinite(dur) && dur > 0) resolve(dur);
-            else reject(new Error("no duration"));
-          };
-          video.onerror = () => { URL.revokeObjectURL(videoUrl); reject(new Error("video error")); };
-          video.src = videoUrl;
-        });
+        const { getVideoDuration } = await import("@/lib/video-duration");
+        durationSec = await getVideoDuration(blob, ac.signal);
       } catch {
         // Fallback: try FFmpeg probe
       }
