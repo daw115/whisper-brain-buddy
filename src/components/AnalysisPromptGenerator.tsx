@@ -31,7 +31,6 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [showAllFrames, setShowAllFrames] = useState(false);
-  const [showAllFrames, setShowAllFrames] = useState(false);
   const [slideTranscript, setSlideTranscript] = useState<string | null>(null);
   const [integratedTranscript, setIntegratedTranscript] = useState<string | null>(null);
   const [geminiSlides, setGeminiSlides] = useState<SlideInfo[]>([]);
