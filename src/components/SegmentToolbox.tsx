@@ -579,6 +579,8 @@ export default function SegmentToolbox({
 
   async function handleSplitVideoSegment(seg: VideoSegment) {
     if (!seg.signedUrl) { toast.error("Brak URL segmentu"); return; }
+    const ac = new AbortController();
+    abortRef.current = ac;
     setPhase("splitting-video");
     setBatchProgress({ current: 0, total: 0, percent: 0 });
 
@@ -586,6 +588,7 @@ export default function SegmentToolbox({
       toast.loading("Pobieranie segmentu wideo…", { id: "split-video" });
       const res = await fetch(seg.signedUrl);
       const blob = await res.blob();
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
       const inputBytes = new Uint8Array(await blob.arrayBuffer());
 
       // 1. Get real duration using <video> element (much more reliable than FFmpeg probe for webm)
