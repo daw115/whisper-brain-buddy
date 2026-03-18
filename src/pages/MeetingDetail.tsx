@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Play, Download, Brain } from "lucide-react";
 import { useMeeting } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
 import TranscriptView from "@/components/TranscriptView";
 import ActionItemsList from "@/components/ActionItemsList";
+import AIChatPanel from "@/components/AIChatPanel";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -12,6 +13,7 @@ export default function MeetingDetail() {
   const { data: meeting, isLoading } = useMeeting(id);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [showChat, setShowChat] = useState(false);
 
   useEffect(() => {
     if (!meeting?.recording_filename) return;
@@ -55,7 +57,20 @@ export default function MeetingDetail() {
         Back to Dashboard
       </button>
 
-      <h1 className="text-2xl font-semibold text-foreground mb-4">{meeting.title}</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-semibold text-foreground">{meeting.title}</h1>
+        <button
+          onClick={() => setShowChat(!showChat)}
+          className={`flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md border transition-colors press-effect ${
+            showChat
+              ? "bg-primary/10 border-primary/30 text-primary"
+              : "border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/50"
+          }`}
+        >
+          <Brain className="w-4 h-4" />
+          Ask AI
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center gap-5 text-sm text-muted-foreground font-mono-data mb-8">
         <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />{meeting.date}</span>
@@ -174,6 +189,12 @@ export default function MeetingDetail() {
           )}
         </div>
       </div>
+
+      {showChat && (
+        <div className="mt-6 border border-border rounded-lg overflow-hidden bg-card" style={{ height: 420 }}>
+          <AIChatPanel meetingId={id} meetingTitle={meeting.title} />
+        </div>
+      )}
     </div>
   );
 }

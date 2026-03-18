@@ -11,11 +11,13 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 async function streamChat({
   messages,
+  meetingId,
   onDelta,
   onDone,
   onError,
 }: {
   messages: Message[];
+  meetingId?: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (msg: string) => void;
@@ -26,7 +28,7 @@ async function streamChat({
       "Content-Type": "application/json",
       Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, meetingId }),
   });
 
   if (!resp.ok) {
@@ -91,7 +93,12 @@ async function streamChat({
   onDone();
 }
 
-export default function AIChatPanel() {
+interface AIChatPanelProps {
+  meetingId?: string;
+  meetingTitle?: string;
+}
+
+export default function AIChatPanel({ meetingId, meetingTitle }: AIChatPanelProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -126,6 +133,7 @@ export default function AIChatPanel() {
     try {
       await streamChat({
         messages: updated,
+        meetingId,
         onDelta: upsert,
         onDone: () => setLoading(false),
         onError: (msg) => { setError(msg); setLoading(false); },
@@ -143,13 +151,22 @@ export default function AIChatPanel() {
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <Brain className="w-12 h-12 text-muted-foreground/30 mb-4" />
-            <p className="text-sm text-muted-foreground">Ask a question about your meetings.</p>
+            <p className="text-sm text-muted-foreground">
+              {meetingTitle ? `Ask about "${meetingTitle}"` : "Ask a question about your meetings."}
+            </p>
             <div className="flex flex-wrap gap-2 mt-4 max-w-md justify-center">
-              {[
-                "What decisions were made about transformer parameters?",
-                "Summarize all meetings from last week",
-                "List tasks assigned to Dawid",
-              ].map((q) => (
+              {(meetingId
+                ? [
+                    "Summarize this meeting",
+                    "What were the key decisions?",
+                    "List all action items",
+                  ]
+                : [
+                    "What decisions were made about transformer parameters?",
+                    "Summarize all meetings from last week",
+                    "List tasks assigned to Dawid",
+                  ]
+              ).map((q) => (
                 <button
                   key={q}
                   onClick={() => { setInput(q); }}

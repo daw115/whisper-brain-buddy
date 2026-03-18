@@ -7,7 +7,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-async function buildMeetingContext(authHeader: string): Promise<string> {
+async function buildMeetingContext(authHeader: string, meetingId?: string): Promise<string> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
@@ -15,11 +15,18 @@ async function buildMeetingContext(authHeader: string): Promise<string> {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const { data: meetings, error } = await supabase
+  let query = supabase
     .from("meetings")
     .select("*, meeting_participants(*), action_items(*), decisions(*), transcript_lines(*)")
-    .order("date", { ascending: false })
-    .limit(50);
+    .order("date", { ascending: false });
+
+  if (meetingId) {
+    query = query.eq("id", meetingId);
+  } else {
+    query = query.limit(50);
+  }
+
+  const { data: meetings, error } = await query;
 
   if (error || !meetings?.length) {
     return "No meeting data available yet. The user hasn't recorded any meetings.";
@@ -75,17 +82,21 @@ serve(async (req) => {
   }
 
   try {
-    const { messages } = await req.json();
+    const { messages, meetingId } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const authHeader = req.headers.get("Authorization") || "";
-    const meetingContext = await buildMeetingContext(authHeader);
+    const meetingContext = await buildMeetingContext(authHeader, meetingId);
 
-    const systemPrompt = `You are Cerebro, an AI meeting intelligence assistant. You have access to the user's real meeting data below.
-Answer questions based on this data. Cite meeting titles and dates when possible. If you can't find relevant info, say so.
+    const scopeNote = meetingId
+      ? "You are focused on ONE specific meeting. Answer questions only about this meeting's data below."
+      : "You have access to the user's meeting database. Cite meeting titles and dates when possible.";
 
-MEETING DATABASE:
+    const systemPrompt = `You are Cerebro, an AI meeting intelligence assistant. ${scopeNote}
+If you can't find relevant info, say so.
+
+MEETING DATA:
 
 ${meetingContext}`;
 
