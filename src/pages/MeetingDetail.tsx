@@ -265,7 +265,9 @@ export default function MeetingDetail() {
                 <RecordingSegments
                   key={segmentsVersion}
                   recordingFilename={meeting.recording_filename}
+                  meetingId={meeting.id}
                   onFramesGenerated={() => setFramesVersion((v) => v + 1)}
+                  onTranscriptGenerated={() => queryClient.invalidateQueries({ queryKey: ["meeting", id] })}
                 />
               </div>
 
