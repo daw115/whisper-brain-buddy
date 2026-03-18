@@ -4,6 +4,7 @@ import {
   Search,
   MessageSquare,
   ListChecks,
+  Upload,
   Settings,
   Brain,
   LogOut,
