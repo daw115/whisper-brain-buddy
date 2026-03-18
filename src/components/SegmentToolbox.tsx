@@ -77,6 +77,7 @@ export default function SegmentToolbox({
   const [language, setLanguage] = useState<TranscriptionLanguage>("pl");
   const [transcribeMode, setTranscribeMode] = useState<"online" | "offline">("online");
   const [chunkMB, setChunkMB] = useState(20);
+  const [maxSegmentMB, setMaxSegmentMB] = useState(100);
   const [frameInterval, setFrameInterval] = useState(30);
   const [expandedFrameIdx, setExpandedFrameIdx] = useState<number | null>(null);
   const [cachedFrames, setCachedFrames] = useState<{ base64: string; timestamp: string }[]>([]);
@@ -246,10 +247,48 @@ export default function SegmentToolbox({
         await ffmpeg.exec(["-i", inputName, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", outputName]);
         const mp3Data = await ffmpeg.readFile(outputName);
         const mp3Blob = new Blob([mp3Data], { type: "audio/mpeg" });
+        const mp3SizeMB = mp3Blob.size / (1024 * 1024);
 
-        const mp3Name = seg.name.replace(/\.[^.]+$/, ".mp3");
-        const path = `${user.id}/audio/${mp3Name}`;
-        await supabase.storage.from("recordings").upload(path, mp3Blob, { contentType: "audio/mpeg", upsert: true });
+        const mp3Stem = seg.name.replace(/\.[^.]+$/, "");
+
+        if (mp3SizeMB > maxSegmentMB) {
+          // Auto-split large MP3 into sub-segments
+          toast.loading(`Segment ${i + 1} = ${mp3SizeMB.toFixed(0)} MB → dzielenie na ≤${maxSegmentMB} MB…`, { id: "extract-mp3" });
+          await ffmpeg.writeFile("autosplit_input.mp3", mp3Data);
+
+          // Estimate duration
+          let durationSec = 0;
+          const logHandler = ({ message }: { message: string }) => {
+            const match = message.match(/Duration:\s+(\d+):(\d+):(\d+)/);
+            if (match) durationSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]);
+          };
+          ffmpeg.on("log", logHandler);
+          await ffmpeg.exec(["-i", "autosplit_input.mp3", "-f", "null", "-t", "0", "/dev/null"]).catch(() => {});
+          if (durationSec <= 0) durationSec = Math.max(60, mp3Blob.size / (8 * 1024));
+
+          const chunkBytes = maxSegmentMB * 1024 * 1024;
+          const bytesPerSec = mp3Blob.size / durationSec;
+          const segDuration = Math.max(10, Math.floor(chunkBytes / bytesPerSec));
+
+          await ffmpeg.exec(["-i", "autosplit_input.mp3", "-c", "copy", "-f", "segment", "-segment_time", String(segDuration), "-reset_timestamps", "1", "autosplit_%03d.mp3"]);
+
+          for (let j = 0; j < 999; j++) {
+            const chunkName = `autosplit_${String(j).padStart(3, "0")}.mp3`;
+            try {
+              const data = await ffmpeg.readFile(chunkName) as Uint8Array;
+              if (data.length === 0) break;
+              const partBlob = new Blob([new Uint8Array(data)], { type: "audio/mpeg" });
+              const partPath = `${user.id}/audio/${mp3Stem}_sub${j + 1}.mp3`;
+              await supabase.storage.from("recordings").upload(partPath, partBlob, { contentType: "audio/mpeg", upsert: true });
+              try { await ffmpeg.deleteFile(chunkName); } catch {}
+            } catch { break; }
+          }
+          try { await ffmpeg.deleteFile("autosplit_input.mp3"); } catch {}
+        } else {
+          // Upload as single file
+          const path = `${user.id}/audio/${mp3Stem}.mp3`;
+          await supabase.storage.from("recordings").upload(path, mp3Blob, { contentType: "audio/mpeg", upsert: true });
+        }
 
         try { await ffmpeg.deleteFile(inputName); await ffmpeg.deleteFile(outputName); } catch {}
       }
@@ -622,16 +661,28 @@ export default function SegmentToolbox({
           </button>
         </div>
 
-        {/* Frame interval */}
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <span>Slajdy co:</span>
-          <input
-            type="number" min={1} max={300} value={frameInterval}
-            onChange={e => { const v = parseInt(e.target.value); if (v >= 1 && v <= 300) setFrameInterval(v); }}
-            disabled={busy}
-            className="w-12 text-xs bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground text-center"
-          />
-          <span>sek</span>
+        {/* Frame interval + Max segment size */}
+        <div className="flex items-center gap-4 flex-wrap text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Slajdy co:</span>
+            <input
+              type="number" min={1} max={300} value={frameInterval}
+              onChange={e => { const v = parseInt(e.target.value); if (v >= 1 && v <= 300) setFrameInterval(v); }}
+              disabled={busy}
+              className="w-12 text-xs bg-muted/50 border border-border rounded px-1.5 py-0.5 text-foreground text-center"
+            />
+            <span>sek</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span>Max segment:</span>
+            <div className="flex gap-1">
+              {[25, 50, 100, 200].map(v => (
+                <button key={v} onClick={() => setMaxSegmentMB(v)} disabled={busy}
+                  className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${maxSegmentMB === v ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                >{v} MB</button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Progress for video tools */}
