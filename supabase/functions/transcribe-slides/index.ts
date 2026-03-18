@@ -576,9 +576,13 @@ Format: 📊 [MM:SS] "Tytuł" — opis i podsumowanie`;
             parameters: {
               type: "object",
               properties: {
-                integrated_transcript: {
+                conversation_transcript: {
                   type: "string",
-                  description: "Pełna zagregowana transkrypcja z dialogami i znacznikami slajdów chronologicznie.",
+                  description: "SEKCJA 1: Pełna transkrypcja rozmowy (~50 min) z poprawionymi mówcami i błędami. Format: [MM:SS] Imię: wypowiedź. KAŻDA linia z audio musi być uwzględniona.",
+                },
+                slides_section: {
+                  type: "string",
+                  description: "SEKCJA 2: Wszystkie slajdy z opisami i podsumowaniami. Format: 📊 [MM:SS] Tytuł — opis i podsumowanie.",
                 },
                 summary: {
                   type: "string",
@@ -604,7 +608,7 @@ Format: 📊 [MM:SS] "Tytuł" — opis i podsumowanie`;
                   description: "Lista slajdów z ich pozycjami w chronologii spotkania.",
                 },
               },
-              required: ["integrated_transcript", "summary", "speakers", "slide_markers"],
+              required: ["conversation_transcript", "slides_section", "summary", "speakers", "slide_markers"],
               additionalProperties: false,
             },
           },
