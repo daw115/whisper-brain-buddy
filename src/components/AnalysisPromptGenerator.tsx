@@ -269,54 +269,8 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
     setTimeout(() => setCopied(false), 2000);
   }
 
-  async function handleConvertMp3() {
-    if (!recordingUrl) return;
-    setConvertingMp3(true);
 
-    try {
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile } = await import("@ffmpeg/util");
 
-      const ffmpeg = new FFmpeg();
-      await ffmpeg.load({
-        coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
-        wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
-      });
-
-      toast.info("Pobieranie nagrania…");
-      const videoData = await fetchFile(recordingUrl);
-      await ffmpeg.writeFile("input.webm", videoData);
-
-      toast.info("Konwersja do MP3… To może potrwać kilka minut.");
-      await ffmpeg.exec(["-i", "input.webm", "-vn", "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", "output.mp3"]);
-
-      const rawData = await ffmpeg.readFile("output.mp3");
-      const blob = new Blob([rawData as any], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-      setMp3Url(url);
-      setMp3Size((blob.size / (1024 * 1024)).toFixed(1));
-
-      await ffmpeg.deleteFile("input.webm");
-      await ffmpeg.deleteFile("output.mp3");
-
-      toast.success(`MP3 gotowy: ${(blob.size / (1024 * 1024)).toFixed(1)} MB`);
-    } catch (err: any) {
-      console.error("FFmpeg error:", err);
-      toast.error("Błąd konwersji: " + (err.message || "nieznany"));
-    } finally {
-      setConvertingMp3(false);
-    }
-  }
-
-  function downloadMp3() {
-    if (!mp3Url) return;
-    const a = document.createElement("a");
-    a.href = mp3Url;
-    a.download = (meeting.recording_filename || "recording").replace(/\.[^.]+$/, ".mp3");
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
 
   async function handleDownloadZip() {
     setDownloading(true);
