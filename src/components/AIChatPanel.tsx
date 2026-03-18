@@ -93,7 +93,12 @@ async function streamChat({
   onDone();
 }
 
-export default function AIChatPanel() {
+interface AIChatPanelProps {
+  meetingId?: string;
+  meetingTitle?: string;
+}
+
+export default function AIChatPanel({ meetingId, meetingTitle }: AIChatPanelProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
