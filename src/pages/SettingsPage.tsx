@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, X, Loader2, Users, FolderOpen, LogOut, Trash2 } from "lucide-react";
+import { Plus, X, Loader2, Users, FolderOpen, LogOut, Trash2, Pencil, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -46,6 +46,9 @@ export default function SettingsPage() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState(CATEGORY_COLORS[0].value);
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [editingPinId, setEditingPinId] = useState<string | null>(null);
+  const [editingPinValue, setEditingPinValue] = useState("");
+  const [savingPin, setSavingPin] = useState(false);
 
   useEffect(() => {
     loadPinUsers();
@@ -91,6 +94,28 @@ export default function SettingsPage() {
       toast.error(err.message || "Nie udało się utworzyć użytkownika");
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const changePin = async (userId: string) => {
+    if (editingPinValue.length !== 4 || !/^\d{4}$/.test(editingPinValue)) {
+      toast.error("PIN musi mieć 4 cyfry");
+      return;
+    }
+    setSavingPin(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-pin-user", {
+        body: { action: "change_pin", user_id: userId, pin_code: editingPinValue },
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+      toast.success("PIN zmieniony");
+      setEditingPinId(null);
+      setEditingPinValue("");
+      loadPinUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Nie udało się zmienić PIN-u");
+    } finally {
+      setSavingPin(false);
     }
   };
 
@@ -174,16 +199,55 @@ export default function SettingsPage() {
               <>
                 {pinUsers.map((user) => (
                   <div key={user.id} className="flex items-center justify-between px-5 py-3 border-b border-border last:border-b-0">
-                    <div>
+                    <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-foreground">{user.name}</span>
-                      <span className="text-xs text-muted-foreground font-mono-data ml-3">PIN: {user.pin_code}</span>
+                      {editingPinId === user.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            value={editingPinValue}
+                            onChange={(e) => setEditingPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                            onKeyDown={(e) => e.key === "Enter" && changePin(user.id)}
+                            inputMode="numeric"
+                            maxLength={4}
+                            autoFocus
+                            className="w-16 bg-background border border-primary/50 rounded px-2 py-0.5 text-xs text-foreground font-mono-data text-center focus:outline-none"
+                            placeholder="____"
+                          />
+                          <button
+                            onClick={() => changePin(user.id)}
+                            disabled={savingPin || editingPinValue.length !== 4}
+                            className="text-primary hover:text-primary/80 disabled:opacity-40 transition-colors"
+                          >
+                            {savingPin ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={() => { setEditingPinId(null); setEditingPinValue(""); }}
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground font-mono-data">PIN: {user.pin_code}</span>
+                      )}
                     </div>
-                    <button
-                      onClick={() => deletePinUser(user)}
-                      className="text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {editingPinId !== user.id && (
+                        <button
+                          onClick={() => { setEditingPinId(user.id); setEditingPinValue(""); }}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          title="Zmień PIN"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => deletePinUser(user)}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {pinUsers.length === 0 && (
