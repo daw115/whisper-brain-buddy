@@ -331,7 +331,12 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
       toast.info("Pakuję prompt…");
       zip.file("prompt.txt", buildPrompt());
 
-      // 2. Add selected frames (fetch as blob)
+      // 2. Add integrated transcript as separate file if available
+      if (integratedTranscript) {
+        zip.file("transkrypcja_zagregowana.txt", integratedTranscript);
+      }
+
+      // 3. Add selected slide images
       if (selectedFrames.length > 0) {
         toast.info(`Pakuję ${selectedFrames.length} slajdów…`);
         const slidesFolder = zip.folder("slajdy");
@@ -347,15 +352,6 @@ Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
             console.warn(`Failed to fetch frame ${i}:`, err);
           }
         }
-      }
-
-      // 3. Add MP3 if ready
-      if (mp3Url) {
-        toast.info("Pakuję MP3…");
-        const resp = await fetch(mp3Url);
-        const blob = await resp.blob();
-        const mp3Name = (meeting.recording_filename || "recording").replace(/\.[^.]+$/, ".mp3");
-        zip.file(mp3Name, blob);
       }
 
       // 4. Generate and download ZIP
