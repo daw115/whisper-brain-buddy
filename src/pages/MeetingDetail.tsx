@@ -158,6 +158,11 @@ export default function MeetingDetail() {
           <div className="mt-6 pt-4 border-t border-border">
             <AnalysisPromptGenerator meeting={meeting} />
           </div>
+
+          {/* Analysis JSON Importer */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <AnalysisJsonImporter meetingId={meeting.id} />
+          </div>
         </div>
 
         {/* Center: Transcript */}
