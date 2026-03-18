@@ -16,7 +16,7 @@ serve(async (req) => {
     const { meetingId, mode } = await req.json();
     if (!meetingId) throw new Error("meetingId is required");
 
-    // mode: "captions" | "slides" | "aggregate" | "both"
+    // mode: "captions" | "unique-frames" | "aggregate" | "both"
     const selectedMode = mode || "both";
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -40,10 +40,11 @@ serve(async (req) => {
 
     if (meetErr || !meeting) {
       return new Response(JSON.stringify({ error: "Meeting not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // ---- Helpers ----
 
     async function callAI(contentParts: any[], tools: any[], toolChoice: any) {
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -61,8 +62,8 @@ serve(async (req) => {
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        console.error("AI gateway error:", response.status, text);
+        const t = await response.text();
+        console.error("AI gateway error:", response.status, t);
         if (response.status === 429) throw { status: 429, message: "Rate limit — spróbuj za chwilę" };
         if (response.status === 402) throw { status: 402, message: "Brak kredytów AI" };
         throw { status: 500, message: `AI error: ${response.status}` };
@@ -71,28 +72,24 @@ serve(async (req) => {
       const aiResult = await response.json();
       const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
       if (!toolCall) {
-        console.error("No tool call in response:", JSON.stringify(aiResult).slice(0, 500));
+        console.error("No tool call:", JSON.stringify(aiResult).slice(0, 500));
         throw { status: 500, message: "AI did not return structured result" };
       }
-
       return JSON.parse(toolCall.function.arguments);
     }
 
-    async function saveAnalysis(source: string, analysisJson: any) {
+    async function saveAnalysis(source: string, json: any) {
       const { error } = await supabase.from("meeting_analyses").insert({
-        meeting_id: meetingId,
-        source,
-        analysis_json: analysisJson,
+        meeting_id: meetingId, source, analysis_json: json,
       });
-
       if (error) {
         console.error(`Failed to save ${source}:`, error);
         throw new Error(`Failed to save ${source}`);
       }
     }
 
-    async function loadLatestAnalysis(source: string) {
-      const { data, error } = await supabase
+    async function loadLatest(source: string) {
+      const { data } = await supabase
         .from("meeting_analyses")
         .select("analysis_json")
         .eq("meeting_id", meetingId)
@@ -100,26 +97,18 @@ serve(async (req) => {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-
-      if (error) {
-        console.error(`Failed to load ${source}:`, error);
-        throw new Error(`Failed to load ${source}`);
-      }
-
       return data?.analysis_json ?? null;
     }
 
-    async function loadFrames() {
-      if (!meeting.recording_filename) {
-        throw new Error("No recording filename");
-      }
+    // Load and deduplicate frames — returns frame metadata + paths (NO AI call)
+    async function loadUniqueFrames() {
+      if (!meeting.recording_filename) throw { status: 400, message: "No recording filename" };
 
       const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
       const dirPrefixes = [`${meeting.user_id}/frames/${stem}`];
 
       const { data: allDirs } = await supabaseAdmin.storage
-        .from("recordings")
-        .list(`${meeting.user_id}/frames`);
+        .from("recordings").list(`${meeting.user_id}/frames`);
 
       if (allDirs) {
         for (const d of allDirs) {
@@ -129,34 +118,30 @@ serve(async (req) => {
         }
       }
 
-      const allFrameFiles: { path: string; timestamp: number; segPart: string }[] = [];
+      const allFiles: { path: string; timestamp: number }[] = [];
       for (const prefix of dirPrefixes) {
-        const segName = prefix.split("/").pop() || "";
         const { data: files } = await supabaseAdmin.storage
           .from("recordings")
           .list(prefix, { limit: 100, sortBy: { column: "name", order: "asc" } });
-
         if (files) {
-          for (const file of files) {
-            if (!file.name.match(/\.(jpg|jpeg|png)$/i)) continue;
-            const match = file.name.match(/frame_(\d+)/);
-            const ts = match ? parseInt(match[1]) : 0;
-            allFrameFiles.push({ path: `${prefix}/${file.name}`, timestamp: ts, segPart: segName });
+          for (const f of files) {
+            if (!f.name.match(/\.(jpg|jpeg|png)$/i)) continue;
+            const m = f.name.match(/frame_(\d+)/);
+            allFiles.push({ path: `${prefix}/${f.name}`, timestamp: m ? parseInt(m[1]) : 0 });
           }
         }
       }
 
-      allFrameFiles.sort((a, b) => a.timestamp - b.timestamp);
-      console.log(`Found ${allFrameFiles.length} frame files across ${dirPrefixes.length} directories`);
+      allFiles.sort((a, b) => a.timestamp - b.timestamp);
+      console.log(`Found ${allFiles.length} frame files across ${dirPrefixes.length} dirs`);
 
-      if (allFrameFiles.length === 0) {
-        throw { status: 400, message: "No frames found — generate frames first" };
-      }
+      if (allFiles.length === 0) throw { status: 400, message: "No frames found — generate frames first" };
 
-      const frames: { base64: string; mimeType: string; timestamp: string; seconds: number }[] = [];
+      // Deduplicate by 2KB header hash
+      const unique: { path: string; timestamp: number }[] = [];
       const seenHashes = new Set<string>();
 
-      for (const ff of allFrameFiles.slice(0, 40)) {
+      for (const ff of allFiles.slice(0, 60)) {
         const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
         if (!data) continue;
 
@@ -166,28 +151,31 @@ serve(async (req) => {
         for (let j = 0; j < slice.length; j += 4) {
           hash = ((hash << 5) - hash + slice[j]) | 0;
         }
-
         const hashStr = hash.toString(36);
         if (seenHashes.has(hashStr)) continue;
         seenHashes.add(hashStr);
+        unique.push(ff);
+        if (unique.length >= 30) break;
+      }
 
+      console.log(`Deduplicated to ${unique.length} unique frames`);
+      return unique;
+    }
+
+    // Load frames + build image parts for AI (captions OCR)
+    async function loadFramesForAI(uniqueFrames: { path: string; timestamp: number }[]) {
+      const frames: { base64: string; mimeType: string; timestamp: string }[] = [];
+      for (const ff of uniqueFrames.slice(0, 25)) {
+        const { data } = await supabaseAdmin.storage.from("recordings").download(ff.path);
+        if (!data) continue;
+        const bytes = new Uint8Array(await data.arrayBuffer());
         const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
         const isJpeg = ff.path.match(/\.jpe?g$/i);
         const mimeType = isJpeg ? "image/jpeg" : "image/png";
         const mins = Math.floor(ff.timestamp / 60);
         const secs = ff.timestamp % 60;
-
-        frames.push({
-          base64,
-          mimeType,
-          timestamp: `${mins}:${String(secs).padStart(2, "0")}`,
-          seconds: ff.timestamp,
-        });
-
-        if (frames.length >= 25) break;
+        frames.push({ base64, mimeType, timestamp: `${mins}:${String(secs).padStart(2, "0")}` });
       }
-
-      console.log(`Loaded ${frames.length} unique frames for OCR`);
       return frames;
     }
 
@@ -195,20 +183,38 @@ serve(async (req) => {
       const parts: any[] = [];
       for (const frame of frames) {
         parts.push({ type: "text", text: `\n--- Klatka @ ${frame.timestamp} ---` });
-        parts.push({
-          type: "image_url",
-          image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` },
-        });
+        parts.push({ type: "image_url", image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` } });
       }
       return parts;
     }
 
     const results: Record<string, any> = {};
-    const needsFrames = selectedMode === "captions" || selectedMode === "slides" || selectedMode === "both";
-    const frames = needsFrames ? await loadFrames() : [];
 
+    // ========== UNIQUE FRAMES (dedup, no AI) ==========
+    if (selectedMode === "unique-frames" || selectedMode === "both") {
+      console.log("Identifying unique frames...");
+      const uniqueFrames = await loadUniqueFrames();
+      const frameData = uniqueFrames.map(f => ({
+        path: f.path,
+        timestamp: f.timestamp,
+        timestamp_formatted: `${Math.floor(f.timestamp / 60)}:${String(f.timestamp % 60).padStart(2, "0")}`,
+      }));
+      await saveAnalysis("unique-frames", { frames: frameData, total_unique: frameData.length });
+      results.uniqueFrames = { frames: frameData, total_unique: frameData.length };
+    }
+
+    // ========== CAPTIONS OCR (dialogi z paska na dole) ==========
     if (selectedMode === "captions" || selectedMode === "both") {
       console.log("Running CAPTIONS OCR...");
+      // Use already-loaded unique frames if available, otherwise load
+      let uniqueFrames: { path: string; timestamp: number }[];
+      if (results.uniqueFrames) {
+        uniqueFrames = results.uniqueFrames.frames.map((f: any) => ({ path: f.path, timestamp: f.timestamp }));
+      } else {
+        uniqueFrames = await loadUniqueFrames();
+      }
+      const frames = await loadFramesForAI(uniqueFrames);
+
       const captionParts: any[] = [
         {
           type: "text",
@@ -236,134 +242,48 @@ Poniżej klatki:`,
         ...buildImageParts(frames),
       ];
 
-      const captionResult = await callAI(
-        captionParts,
-        [{
-          type: "function",
-          function: {
-            name: "save_captions",
-            description: "Save extracted captions/dialogues from video frames",
-            parameters: {
-              type: "object",
-              properties: {
-                transcript: {
-                  type: "string",
-                  description: "Chronologiczna transkrypcja dialogów z napisów na dole ekranu. Format: [MM:SS] Mówca: tekst.",
-                },
-                entries: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      timestamp: { type: "string" },
-                      speaker: { type: "string" },
-                      text: { type: "string" },
-                    },
-                    required: ["timestamp", "speaker", "text"],
-                    additionalProperties: false,
+      const captionResult = await callAI(captionParts, [{
+        type: "function",
+        function: {
+          name: "save_captions",
+          description: "Save extracted captions/dialogues from video frames",
+          parameters: {
+            type: "object",
+            properties: {
+              transcript: { type: "string", description: "Chronologiczna transkrypcja dialogów. Format: [MM:SS] Mówca: tekst." },
+              entries: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    timestamp: { type: "string" },
+                    speaker: { type: "string" },
+                    text: { type: "string" },
                   },
+                  required: ["timestamp", "speaker", "text"],
+                  additionalProperties: false,
                 },
-                total_entries: { type: "number" },
               },
-              required: ["transcript", "entries", "total_entries"],
-              additionalProperties: false,
+              total_entries: { type: "number" },
             },
+            required: ["transcript", "entries", "total_entries"],
+            additionalProperties: false,
           },
-        }],
-        { type: "function", function: { name: "save_captions" } },
-      );
+        },
+      }], { type: "function", function: { name: "save_captions" } });
 
       console.log(`Captions: ${captionResult.total_entries} entries, ${captionResult.transcript?.length ?? 0} chars`);
       await saveAnalysis("captions-ocr", captionResult);
       results.captions = captionResult;
     }
 
-    if (selectedMode === "slides" || selectedMode === "both") {
-      console.log("Running SLIDES OCR...");
-      const slideParts: any[] = [
-        {
-          type: "text",
-          text: `Jesteś ekspertem OCR/analizy slajdów prezentacji.
-
-Poniżej ${frames.length} klatek z nagrania spotkania biznesowego.
-
-## CO CZYTAĆ
-Skup się na **treści prezentacji/slajdów** wyświetlanej w **głównej (centralnej/górnej) części ekranu**.
-
-⚠️ IGNORUJ napisy/subtitles z dolnej części ekranu (czarny pasek z dialogami) — to osobne źródło.
-⚠️ Jeśli slajd się powtarza — pomiń duplikat.
-
-## ZADANIE
-Dla KAŻDEGO unikalnego slajdu:
-1. Odczytaj CAŁĄ treść: tytuły, nagłówki, bullet pointy, tekst, dane liczbowe
-2. Opisz wykresy (osie, wartości, trendy), tabele (odtwórz strukturę), diagramy
-3. Zidentyfikuj typ slajdu (tytułowy, agenda, dane, wykres, tabela, podsumowanie)
-
-## FORMAT
-[MM:SS] 📊 SLAJD (typ): "Tytuł"
-Treść: pełny tekst ze slajdu
-Dane: wartości liczbowe, wykresy, tabele
-
-Poniżej klatki:`,
-        },
-        ...buildImageParts(frames),
-      ];
-
-      const slideResult = await callAI(
-        slideParts,
-        [{
-          type: "function",
-          function: {
-            name: "save_slides",
-            description: "Save extracted slide content from presentation frames",
-            parameters: {
-              type: "object",
-              properties: {
-                slide_transcript: {
-                  type: "string",
-                  description: "Chronologiczna transkrypcja treści slajdów. Format: [MM:SS] 📊 SLAJD (typ): treść.",
-                },
-                slides: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      timestamp: { type: "string" },
-                      slide_type: { type: "string" },
-                      title: { type: "string" },
-                      full_text: { type: "string" },
-                      data_values: { type: "string" },
-                    },
-                    required: ["timestamp", "title", "full_text"],
-                    additionalProperties: false,
-                  },
-                },
-                total_slides: { type: "number" },
-              },
-              required: ["slide_transcript", "slides", "total_slides"],
-              additionalProperties: false,
-            },
-          },
-        }],
-        { type: "function", function: { name: "save_slides" } },
-      );
-
-      console.log(`Slides: ${slideResult.total_slides} slides, ${slideResult.slide_transcript?.length ?? 0} chars`);
-      await saveAnalysis("slide-transcript", slideResult);
-      results.slides = slideResult;
-    }
-
+    // ========== AGGREGATION (captions + audio, NO slide OCR) ==========
     if (selectedMode === "aggregate" || selectedMode === "both") {
       console.log("Running AGGREGATION...");
 
-      const captionSource = results.captions ?? await loadLatestAnalysis("captions-ocr");
-      const slideSource = results.slides ?? await loadLatestAnalysis("slide-transcript");
-
-      if (!captionSource || !slideSource) {
-        throw {
-          status: 400,
-          message: "Missing captions or slide transcript — run captions and slides OCR first",
-        };
+      const captionSource = results.captions ?? await loadLatest("captions-ocr");
+      if (!captionSource) {
+        throw { status: 400, message: "Missing captions — run captions OCR first" };
       }
 
       const { data: transcriptLines } = await supabase
@@ -374,35 +294,27 @@ Poniżej klatki:`,
         .limit(500);
 
       const audioTranscript = transcriptLines && transcriptLines.length > 0
-        ? transcriptLines.map((line) => `[${line.timestamp}] ${line.speaker}: ${line.text}`).join("\n")
+        ? transcriptLines.map(l => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
         : null;
 
-      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz 3 źródła danych z tego samego spotkania:
+      const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz 2 źródła danych z tego samego spotkania:
 
-## ŹRÓDŁO 1: DIALOGI Z NAPISÓW (OCR z paska na dole ekranu)
+## ŹRÓDŁO 1: DIALOGI Z NAPISÓW (OCR z paska na dole ekranu — live captions)
 ${captionSource.transcript || "Brak"}
 
-## ŹRÓDŁO 2: TREŚĆ SLAJDÓW PREZENTACJI (OCR z głównej części ekranu)
-${slideSource.slide_transcript || "Brak"}
-
-${audioTranscript ? `## ŹRÓDŁO 3: TRANSKRYPT AUDIO (Web Speech API / Whisper)
-${audioTranscript.slice(0, 10000)}` : "## ŹRÓDŁO 3: Brak transkryptu audio"}
+${audioTranscript ? `## ŹRÓDŁO 2: TRANSKRYPT AUDIO (Web Speech API / Whisper)
+${audioTranscript.slice(0, 15000)}` : "## ŹRÓDŁO 2: Brak transkryptu audio"}
 
 ## ZADANIE
-Stwórz JEDNĄ zagregowaną transkrypcję chronologiczną łączącą wszystkie źródła:
+Stwórz JEDNĄ zagregowaną transkrypcję chronologiczną łączącą oba źródła:
 
-1. **Dialogi** — użyj napisów OCR jako bazy, uzupełnij/popraw transkryptem audio (jeśli jest)
-2. **Slajdy** — w odpowiednich miejscach (wg timestampów) wstaw znaczniki slajdów:
-   📊 SLAJD: "Tytuł" — kluczowa treść
-3. **Kontekst** — powiąż co mówiono z jakim slajdem, zaznacz:
-   - Co na slajdzie pokrywa się z dialogiem
-   - Co jest TYLKO na slajdzie (dane, wykresy nieomówione ustnie)
-   - Co powiedziano ustnie czego NIE MA na slajdach
+1. **Dialogi** — użyj napisów OCR jako bazy (są dokładniejsze — mają nazwy mówców)
+2. **Audio** — uzupełnij/popraw z transkryptu audio (jeśli jest)
+3. **Mówcy** — zidentyfikuj pełne imiona mówców z live captions
+4. **Korekta** — popraw ewidentne błędy OCR korzystając z kontekstu audio
 
-Format chronologiczny:
-[MM:SS] Mówca: wypowiedź
-[MM:SS] 📊 SLAJD (typ): treść slajdu | Kontekst: co mówiono
-[MM:SS] 💡 UWAGA: informacja z dialogu bez odpowiednika na slajdzie`;
+Format:
+[MM:SS] Mówca: wypowiedź`;
 
       const aggregateResult = await callAI(
         [{ type: "text", text: aggregatePrompt }],
@@ -410,31 +322,22 @@ Format chronologiczny:
           type: "function",
           function: {
             name: "save_aggregated_transcript",
-            description: "Save the aggregated transcript combining captions, slides and audio",
+            description: "Save the aggregated transcript combining captions and audio",
             parameters: {
               type: "object",
               properties: {
                 integrated_transcript: {
                   type: "string",
-                  description: "Pełna zagregowana transkrypcja łącząca dialogi, slajdy i audio chronologicznie.",
+                  description: "Pełna zagregowana transkrypcja łącząca dialogi i audio chronologicznie.",
                 },
                 summary: {
                   type: "string",
-                  description: "Krótkie podsumowanie spotkania (2-3 zdania) na podstawie wszystkich źródeł.",
+                  description: "Krótkie podsumowanie spotkania (2-3 zdania).",
                 },
-                slide_dialogue_correlations: {
+                speakers: {
                   type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      slide_timestamp: { type: "string" },
-                      slide_title: { type: "string" },
-                      discussed_at: { type: "string", description: "Timestamps kiedy omawiano ten slajd" },
-                      extra_verbal_info: { type: "string", description: "Co powiedziano ustnie czego nie ma na slajdzie" },
-                    },
-                    required: ["slide_timestamp", "slide_title"],
-                    additionalProperties: false,
-                  },
+                  items: { type: "string" },
+                  description: "Lista zidentyfikowanych mówców (pełne imiona).",
                 },
               },
               required: ["integrated_transcript", "summary"],
@@ -457,7 +360,7 @@ Format chronologiczny:
     console.error("transcribe-slides error:", e);
     const status = e.status || 500;
     return new Response(
-      JSON.stringify({ error: e.message || (e instanceof Error ? e.message : "Unknown error") }),
+      JSON.stringify({ error: e.message || "Unknown error" }),
       { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
