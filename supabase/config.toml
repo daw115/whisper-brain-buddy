@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.build-knowledge]
 verify_jwt = false
+
+[functions.transcribe-slides]
+verify_jwt = false
