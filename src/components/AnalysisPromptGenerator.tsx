@@ -151,19 +151,6 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
     const speakers = new Set(transcriptLines.map((l) => l.speaker));
     const hasSegmentSources = [...speakers].some((s) => s.startsWith("Seg"));
 
-    const transcriptSection = hasTranscript
-      ? `TRANSKRYPT${hasSegmentSources ? " (z wielu segmentów, oznaczony źródłem)" : " (z Web Speech API, może zawierać błędy)"}:
----
-${transcriptLines
-  .sort((a, b) => a.line_order - b.line_order)
-  .map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`)
-  .join("\n")
-  .slice(0, 15000)}
----
-${transcriptLines.length > 0 ? `\nŁącznie: ${transcriptLines.length} linii transkryptu` : ""}`
-      : `TRANSKRYPT: Brak automatycznego transkryptu.
-WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
-
     // Use integrated transcript if available (already merged audio+slides by Gemini)
     const hasIntegrated = !!integratedTranscript;
 
