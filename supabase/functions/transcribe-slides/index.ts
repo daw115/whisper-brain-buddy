@@ -272,7 +272,7 @@ serve(async (req) => {
 
     // ========== STEP 4: OCR CAPTIONS ==========
     if (selectedMode === "ocr-captions") {
-      console.log("Step 4: OCR caption crops...");
+      console.log(`Step 4: OCR caption crops batch offset=${batchOffset} size=${batchSize}...`);
 
       const cropData = await loadLatest("crop-split") as any;
       if (!cropData?.caption_crops?.length) {
@@ -280,31 +280,32 @@ serve(async (req) => {
       }
 
       const captionCrops = cropData.caption_crops as { path: string; timestamp: number; ts_formatted: string }[];
+      const currentBatchSize = Math.max(1, Math.min(batchSize, 12));
+      const currentBatch = captionCrops.slice(batchOffset, batchOffset + currentBatchSize);
+      const previousResult = batchOffset > 0 ? await loadLatest("captions-ocr") as any : null;
 
-      // Load caption images in batches of 25 for AI
-      const BATCH_SIZE = 25;
-      const allEntries: { timestamp: string; speaker: string; text: string }[] = [];
-      const speakersSet = new Set<string>();
+      if (currentBatch.length === 0) {
+        throw { status: 400, message: "No caption frames left to process" };
+      }
 
-      for (let batchStart = 0; batchStart < captionCrops.length; batchStart += BATCH_SIZE) {
-        const batch = captionCrops.slice(batchStart, batchStart + BATCH_SIZE);
-        const imageParts: any[] = [];
+      const imageParts: any[] = [];
+      for (const cap of currentBatch) {
+        const { data: blob } = await supabaseAdmin.storage.from("recordings").download(cap.path);
+        if (!blob) continue;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const base64 = bytesToBase64(bytes);
+        imageParts.push({ type: "text", text: `\n--- Napis @ ${cap.ts_formatted} ---` });
+        imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
+      }
 
-        for (const cap of batch) {
-          const { data: blob } = await supabaseAdmin.storage.from("recordings").download(cap.path);
-          if (!blob) continue;
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          const base64 = bytesToBase64(bytes);
-          imageParts.push({ type: "text", text: `\n--- Napis @ ${cap.ts_formatted} ---` });
-          imageParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } });
-        }
+      if (imageParts.length === 0) {
+        throw { status: 400, message: "Could not load caption frames for OCR" };
+      }
 
-        if (imageParts.length === 0) continue;
-
-        const ocrParts: any[] = [
-          {
-            type: "text",
-            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} screenów z nagrania spotkania Teams.
+      const ocrParts: any[] = [
+        {
+          type: "text",
+          text: `Jesteś ekspertem OCR. Poniżej ${currentBatch.length} screenów z jednego batcha nagrania spotkania Teams.
 
 Na DOLE każdego ekranu znajduje się ciemny pasek z napisami (live captions/subtitles). Zignoruj resztę ekranu (prezentację) — skupiaj się WYŁĄCZNIE na dolnym pasku z napisami.
 
@@ -315,60 +316,69 @@ Na DOLE każdego ekranu znajduje się ciemny pasek z napisami (live captions/sub
 4. Połącz powtarzające się fragmenty w jedno pełne zdanie
 5. NIE duplikuj — jeśli kolejne klatki mają ten sam tekst, zapisz go tylko raz
 
-Zwróć wynik jako listę chronologicznych wypowiedzi.`,
-          },
-          ...imageParts,
-        ];
+Zwróć wynik jako listę chronologicznych wypowiedzi tylko dla dostarczonych screenów.`,
+        },
+        ...imageParts,
+      ];
 
-        const batchResult = await callAI(ocrParts, [{
-          type: "function",
-          function: {
-            name: "save_caption_ocr",
-            description: "Save OCR results from caption bar crops",
-            parameters: {
-              type: "object",
-              properties: {
-                entries: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      timestamp: { type: "string", description: "MM:SS" },
-                      speaker: { type: "string", description: "Imię mówcy" },
-                      text: { type: "string", description: "Pełne zdanie" },
-                    },
-                    required: ["timestamp", "speaker", "text"],
-                    additionalProperties: false,
+      const batchResult = await callAI(ocrParts, [{
+        type: "function",
+        function: {
+          name: "save_caption_ocr",
+          description: "Save OCR results from caption bar crops",
+          parameters: {
+            type: "object",
+            properties: {
+              entries: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    timestamp: { type: "string", description: "MM:SS" },
+                    speaker: { type: "string", description: "Imię mówcy" },
+                    text: { type: "string", description: "Pełne zdanie" },
                   },
-                },
-                speakers: {
-                  type: "array",
-                  items: { type: "string" },
+                  required: ["timestamp", "speaker", "text"],
+                  additionalProperties: false,
                 },
               },
-              required: ["entries", "speakers"],
-              additionalProperties: false,
+              speakers: {
+                type: "array",
+                items: { type: "string" },
+              },
             },
+            required: ["entries", "speakers"],
+            additionalProperties: false,
           },
-        }], { type: "function", function: { name: "save_caption_ocr" } });
+        },
+      }], { type: "function", function: { name: "save_caption_ocr" } });
 
-        if (batchResult.entries) allEntries.push(...batchResult.entries);
-        if (batchResult.speakers) batchResult.speakers.forEach((s: string) => speakersSet.add(s));
-
-        console.log(`OCR batch ${batchStart / BATCH_SIZE + 1}: ${batchResult.entries?.length ?? 0} entries`);
-      }
-
-      // Build transcript text
-      const transcript = allEntries.map(e => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n");
+      const mergedEntries = dedupeCaptionEntries([
+        ...(previousResult?.entries ?? []),
+        ...(batchResult.entries ?? []),
+      ]);
+      const mergedSpeakers = Array.from(new Set([
+        ...(previousResult?.speakers_identified ?? []),
+        ...(batchResult.speakers ?? []),
+      ].filter(Boolean)));
+      const totalProcessed = Math.min(batchOffset + currentBatch.length, captionCrops.length);
+      const hasMore = totalProcessed < captionCrops.length;
+      const transcript = mergedEntries.map((e) => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n");
 
       const ocrResult = {
         transcript,
-        entries: allEntries,
-        total_entries: allEntries.length,
-        speakers_identified: Array.from(speakersSet),
+        entries: mergedEntries,
+        total_entries: mergedEntries.length,
+        speakers_identified: mergedSpeakers,
+        processed_frames: totalProcessed,
+        frames_total: captionCrops.length,
+        has_more: hasMore,
+        next_offset: hasMore ? totalProcessed : null,
       };
 
-      console.log(`OCR total: ${allEntries.length} entries, ${speakersSet.size} speakers`);
+      console.log(`OCR merged total: ${mergedEntries.length} entries, processed ${totalProcessed}/${captionCrops.length}`);
+      await supabase.from("meeting_analyses").delete()
+        .eq("meeting_id", meetingId).eq("source", "captions-ocr");
       await saveAnalysis("captions-ocr", ocrResult);
       results.captions = ocrResult;
     }
