@@ -42,58 +42,84 @@ export default function AnalysisPromptGenerator({ meeting, recordingUrl, framesV
     if (!user) { setLoading(false); return; }
 
     const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
-    const prefix = `${user.id}/frames/${stem}`;
 
-    const { data: files } = await supabase.storage
+    // Scan for frames from main recording AND all segments
+    const allFrameInfos: FrameInfo[] = [];
+    const prefixes = [`${user.id}/frames/${stem}`];
+
+    // Also look for segment frame folders: stem_part1, stem_part2, etc.
+    const { data: frameDirs } = await supabase.storage
       .from("recordings")
-      .list(`${user.id}/frames/${stem}`, { limit: 100 });
+      .list(`${user.id}/frames`, { limit: 200 });
 
-    if (!files?.length) {
-      setLoading(false);
-      return;
-    }
-
-    const frameInfos: FrameInfo[] = [];
-    for (const file of files) {
-      const path = `${prefix}/${file.name}`;
-      const { data } = await supabase.storage
-        .from("recordings")
-        .createSignedUrl(path, 60 * 60);
-      if (data?.signedUrl) {
-        // Extract timestamp from filename: frame_0.jpg, frame_1.jpg etc.
-        // or frame_0s.jpg, frame_30s.jpg pattern
-        const matchSec = file.name.match(/frame_(\d+)s/);
-        const matchIdx = file.name.match(/frame_(\d+)/);
-        let timestamp = "0:00";
-        if (matchSec) {
-          const secs = parseInt(matchSec[1]);
-          timestamp = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-        } else if (matchIdx) {
-          // Guess interval from sorted file count & names
-          const num = parseInt(matchIdx[1]);
-          timestamp = `#${num}`;
+    if (frameDirs) {
+      for (const dir of frameDirs) {
+        if (dir.name.startsWith(stem + "_part") && dir.id) {
+          prefixes.push(`${user.id}/frames/${dir.name}`);
         }
-        frameInfos.push({ path, url: data.signedUrl, timestamp });
       }
     }
 
-    setFrames(frameInfos);
+    for (const prefix of prefixes) {
+      const { data: files } = await supabase.storage
+        .from("recordings")
+        .list(prefix, { limit: 100 });
+
+      if (!files?.length) continue;
+
+      for (const file of files) {
+        const path = `${prefix}/${file.name}`;
+        const { data } = await supabase.storage
+          .from("recordings")
+          .createSignedUrl(path, 60 * 60);
+        if (data?.signedUrl) {
+          const matchSec = file.name.match(/frame_(\d+)s/);
+          const matchIdx = file.name.match(/frame_(\d+)/);
+          let timestamp = "0:00";
+          if (matchSec) {
+            const secs = parseInt(matchSec[1]);
+            timestamp = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+          } else if (matchIdx) {
+            const num = parseInt(matchIdx[1]);
+            timestamp = `#${num}`;
+          }
+          // Add segment prefix for clarity
+          const segMatch = prefix.match(/_part(\d+)$/);
+          if (segMatch) {
+            timestamp = `S${segMatch[1]}/${timestamp}`;
+          }
+          allFrameInfos.push({ path, url: data.signedUrl, timestamp });
+        }
+      }
+    }
+
+    setFrames(allFrameInfos);
     setLoading(false);
   }
 
   function buildPrompt(): string {
-    const hasTranscript = meeting.transcript_lines && meeting.transcript_lines.length > 0;
+    const transcriptLines = meeting.transcript_lines || [];
+    const hasTranscript = transcriptLines.length > 0;
+
+    // Check if transcript has multiple sources (segments)
+    const speakers = new Set(transcriptLines.map((l) => l.speaker));
+    const hasSegmentSources = [...speakers].some((s) => s.startsWith("Seg"));
 
     const transcriptSection = hasTranscript
-      ? `TRANSKRYPT Z WEB SPEECH API (może zawierać błędy):
+      ? `TRANSKRYPT${hasSegmentSources ? " (z wielu segmentów, oznaczony źródłem)" : " (z Web Speech API, może zawierać błędy)"}:
 ---
-${meeting.transcript_lines!.map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n").slice(0, 12000)}
----`
-      : `TRANSKRYPT: Brak automatycznego transkryptu. 
+${transcriptLines
+  .sort((a, b) => a.line_order - b.line_order)
+  .map((l) => `[${l.timestamp}] ${l.speaker}: ${l.text}`)
+  .join("\n")
+  .slice(0, 15000)}
+---
+${transcriptLines.length > 0 ? `\nŁącznie: ${transcriptLines.length} linii transkryptu` : ""}`
+      : `TRANSKRYPT: Brak automatycznego transkryptu.
 WAŻNE: Wgrano plik MP3 z nagraniem — najpierw go odsłuchaj i stranskrybuj, a potem przeanalizuj razem ze slajdami.`;
 
     const frameSection = frames.length > 0
-      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji (co ~30s nagrania).
+      ? `\nZAŁĄCZONE OBRAZY: ${frames.length} klatek slajdów z prezentacji (z nagrania głównego i/lub segmentów).
 Przeanalizuj treść każdego slajdu — odczytaj tekst, dane liczbowe, wykresy, tabele.
 Powiąż treść slajdów z rozmową.`
       : "";
@@ -101,18 +127,19 @@ Powiąż treść slajdów z rozmową.`
     return `Przeanalizuj spotkanie biznesowe i zwróć wynik w formacie JSON.
 
 DANE WEJŚCIOWE:
-- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)
+${recordingUrl ? "- Plik MP3 z nagraniem audio spotkania (wgrany jako załącznik)" : ""}
 ${frames.length > 0 ? `- ${frames.length} zrzutów ekranu slajdów prezentacji (wgrane jako obrazy)` : ""}
-${hasTranscript ? "- Automatyczny transkrypt z Web Speech API (poniżej)" : ""}
+${hasTranscript ? `- Transkrypt: ${transcriptLines.length} linii${hasSegmentSources ? " (z wielu segmentów nagrania, oznaczone Seg1, Seg2…)" : ""}` : ""}
 
 ${transcriptSection}
 ${frameSection}
 
 ZADANIA:
-1. Odsłuchaj/przeanalizuj plik MP3 — stranskrybuj rozmowę
-2. ${frames.length > 0 ? "Przeanalizuj treść slajdów — odczytaj tekst, dane, wykresy" : "Przeanalizuj treść rozmowy"}
-3. ${frames.length > 0 ? "Powiąż kontekst rozmowy z odpowiednimi slajdami" : "Zidentyfikuj kluczowe tematy"}
-4. Wyciągnij decyzje, zadania i podsumowanie
+1. ${hasTranscript ? "Przeanalizuj dostarczony transkrypt" : "Odsłuchaj/przeanalizuj plik MP3 — stranskrybuj rozmowę"}
+${hasTranscript && recordingUrl ? "2. Jeśli wgrany jest też MP3 — odsłuchaj go i uzupełnij/zweryfikuj transkrypt" : ""}
+${frames.length > 0 ? `${hasTranscript && recordingUrl ? "3" : "2"}. Przeanalizuj treść slajdów — odczytaj tekst, dane, wykresy` : ""}
+${frames.length > 0 ? `${hasTranscript && recordingUrl ? "4" : "3"}. Powiąż kontekst rozmowy z odpowiednimi slajdami` : ""}
+- Wyciągnij decyzje, zadania i podsumowanie
 
 Zwróć DOKŁADNIE taki JSON (bez komentarzy, bez markdown):
 {
@@ -150,7 +177,8 @@ ZASADY:
 3. Decisions = wyraźnie podjęte decyzje
 4. Summary = zwięzłe, po polsku
 5. Tags = główne tematy (max 5)
-6. ${frames.length > 0 ? "Slide insights = analiza każdego slajdu i powiązanie z rozmową" : "Skup się na kluczowych wątkach rozmowy"}`;
+${hasSegmentSources ? "6. Transkrypty z segmentów (Seg1, Seg2…) to części tego samego spotkania — potraktuj je jako ciągłą rozmowę" : ""}
+${frames.length > 0 ? `${hasSegmentSources ? "7" : "6"}. Slide insights = analiza każdego slajdu i powiązanie z rozmową` : ""}`;
   }
 
   function handleCopy() {
@@ -169,10 +197,6 @@ ZASADY:
       const { fetchFile } = await import("@ffmpeg/util");
 
       const ffmpeg = new FFmpeg();
-      ffmpeg.on("progress", ({ progress: p }) => {
-        // progress is available but we show indeterminate for simplicity
-      });
-
       await ffmpeg.load({
         coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
         wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
@@ -241,8 +265,9 @@ ZASADY:
     );
   }
 
+  const transcriptLines = meeting.transcript_lines || [];
+  const hasTranscript = transcriptLines.length > 0;
   const step1Ready = !!mp3Url;
-  const step2Ready = frames.length === 0 || true; // frames are always downloadable if present
 
   return (
     <div className="space-y-4">
@@ -254,9 +279,28 @@ ZASADY:
       <div className="bg-primary/5 border border-primary/20 rounded-md p-3">
         <p className="text-xs font-medium text-primary mb-1">🤖 Użyj modelu: GPT-4o</p>
         <p className="text-[10px] text-muted-foreground leading-relaxed">
-          GPT-4o obsługuje audio (MP3) + obrazy (slajdy) w jednym czacie. 
+          GPT-4o obsługuje audio (MP3) + obrazy (slajdy) w jednym czacie.
           Otwórz <strong>chat.openai.com</strong> → wybierz <strong>GPT-4o</strong> → załącz pliki.
         </p>
+      </div>
+
+      {/* Data summary */}
+      <div className="bg-muted/30 border border-border rounded-md p-3 space-y-1">
+        <p className="text-[11px] font-medium text-foreground">📊 Dostępne dane:</p>
+        <ul className="text-[10px] text-muted-foreground space-y-0.5">
+          {hasTranscript && (
+            <li className="flex items-center gap-1">
+              <Check className="w-3 h-3 text-primary" />
+              Transkrypt: {transcriptLines.length} linii
+              {[...new Set(transcriptLines.map((l) => l.speaker))].some((s) => s.startsWith("Seg")) && " (z wielu segmentów)"}
+            </li>
+          )}
+          {!hasTranscript && (
+            <li className="text-muted-foreground/60">✗ Brak transkryptu — wgraj MP3 do ChatGPT</li>
+          )}
+          {recordingUrl && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> Nagranie dostępne do konwersji MP3</li>}
+          {frames.length > 0 && <li className="flex items-center gap-1"><Check className="w-3 h-3 text-primary" /> {frames.length} klatek slajdów</li>}
+        </ul>
       </div>
 
       {/* Step 1: MP3 */}
@@ -268,6 +312,12 @@ ZASADY:
           </span>
           {step1Ready && <Check className="w-3.5 h-3.5 text-primary" />}
         </div>
+
+        {hasTranscript && !step1Ready && (
+          <p className="text-[10px] text-muted-foreground/80 italic">
+            Masz już transkrypt — MP3 jest opcjonalny (do weryfikacji przez ChatGPT).
+          </p>
+        )}
 
         {recordingUrl ? (
           mp3Url ? (
@@ -369,7 +419,7 @@ ZASADY:
           </button>
         </div>
         <pre className="p-3 text-[10px] leading-relaxed text-muted-foreground max-h-36 overflow-auto whitespace-pre-wrap font-mono-data">
-          {buildPrompt().slice(0, 600)}…
+          {buildPrompt().slice(0, 800)}…
         </pre>
       </div>
 
@@ -381,12 +431,19 @@ ZASADY:
         </p>
         <ol className="list-decimal list-inside space-y-1 text-[11px]">
           <li>Otwórz <strong>chat.openai.com</strong> → model <strong>GPT-4o</strong></li>
-          {recordingUrl && <li>Wgraj plik <strong>MP3</strong> (krok 1) jako załącznik</li>}
+          {recordingUrl && !hasTranscript && <li>Wgraj plik <strong>MP3</strong> (krok 1) jako załącznik</li>}
+          {recordingUrl && hasTranscript && <li><em>(Opcjonalnie)</em> Wgraj <strong>MP3</strong> do weryfikacji transkryptu</li>}
           {frames.length > 0 && <li>Wgraj <strong>klatki slajdów</strong> (krok 2) jako obrazy</li>}
-          <li>Wklej <strong>prompt</strong> (krok 3) i wyślij</li>
+          <li>Wklej <strong>prompt</strong> (krok 3) — zawiera transkrypt{hasTranscript ? ` (${transcriptLines.length} linii)` : ""}</li>
+          <li>Wyślij i poczekaj na wynik</li>
           <li>Skopiuj wynikowy <strong>JSON</strong></li>
           <li>Wklej JSON w sekcji <strong>"Importuj wynik analizy"</strong> poniżej</li>
         </ol>
+        {hasTranscript && (
+          <p className="text-[10px] text-primary/80 mt-1">
+            💡 Transkrypt jest już wbudowany w prompt — ChatGPT go przeanalizuje bez potrzeby osobnego pliku.
+          </p>
+        )}
       </div>
     </div>
   );
