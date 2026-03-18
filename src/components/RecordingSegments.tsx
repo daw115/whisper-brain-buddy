@@ -165,33 +165,22 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
     try {
       toast.loading(`Pobieranie segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
-      // Download segment as raw bytes
+      // Download segment
       const response = await fetch(seg.signedUrl);
       if (!response.ok) throw new Error(`Błąd pobierania: ${response.status}`);
       const arrayBuffer = await response.arrayBuffer();
-      const inputBytes = new Uint8Array(arrayBuffer);
       
-      toast.loading(`Konwersja audio segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+      toast.loading(`Dekodowanie audio segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
-      // Create a fresh FFmpeg instance to avoid FS conflicts
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const ffmpeg = new FFmpeg();
-      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-      await ffmpeg.load({
-        coreURL: `${baseURL}/ffmpeg-core.js`,
-        wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-      });
-
-      await ffmpeg.writeFile("input.webm", inputBytes);
-
-      await ffmpeg.exec(["-i", "input.webm", "-vn", "-ar", "16000", "-ac", "1", "-f", "f32le", "output.pcm"]);
-
-      const pcmData = await ffmpeg.readFile("output.pcm") as Uint8Array;
+      // Use Web Audio API to decode and resample to 16kHz mono
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
       
-      // Terminate FFmpeg before doing anything else
-      ffmpeg.terminate();
-
-      const audioData = new Float32Array(pcmData.buffer);
+      // Get mono channel data (already resampled to 16kHz by AudioContext)
+      const audioData = decoded.getChannelData(0);
+      audioCtx.close();
+      
+      console.log(`Segment #${idx + 1}: ${(audioData.length / 16000).toFixed(0)}s, ${decoded.sampleRate}Hz`);
 
       setTranscribePhase("loading-model");
       toast.loading(`Ładowanie Whisper…`, { id: `trans-${idx}` });
