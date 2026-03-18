@@ -35,7 +35,7 @@ interface Props {
   onTranscriptGenerated?: () => void;
 }
 
-type Phase = "idle" | "downloading" | "converting" | "uploading" | "splitting" | "uploading-parts";
+type Phase = "idle" | "downloading" | "converting" | "uploading" | "splitting" | "uploading-parts" | "batch-transcribing";
 
 const phaseLabels: Record<Phase, string> = {
   idle: "",
