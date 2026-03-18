@@ -89,16 +89,19 @@ export function useRecorder(): RecordingState {
   }, []);
 
   const extractFramesFromSegment = useCallback(async (blob: Blob, filename: string) => {
+    const { extractFramesWithDuration, uploadFrames: uploadFn } = await import("@/lib/frame-extractor");
     const toastId = `frames-${filename}`;
     try {
       toast.loading(`Klatki z ${filename}…`, { id: toastId });
-      const frames = await extractFrames(blob, 30, 30);
+      const offset = cumulativeFrameOffsetRef.current;
+      const { frames, durationSec } = await extractFramesWithDuration(blob, 30, 30, undefined, undefined, offset);
+      cumulativeFrameOffsetRef.current += durationSec;
       if (frames.length > 0) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const segStem = filename.replace(/\.[^.]+$/, "");
-          await uploadFrames(supabase, user.id, segStem, frames);
-          toast.success(`${frames.length} klatek z ${filename}`, { id: toastId, duration: 3000 });
+          await uploadFn(supabase, user.id, segStem, frames);
+          toast.success(`${frames.length} klatek z ${filename} (offset ${Math.round(offset)}s)`, { id: toastId, duration: 3000 });
           return;
         }
       }
