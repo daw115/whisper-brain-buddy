@@ -114,7 +114,7 @@ export default function SettingsPage() {
     try {
       const { error } = await supabase
         .from("categories")
-        .insert({ name: newCategoryName.trim(), user_id: (await supabase.auth.getUser()).data.user!.id });
+        .insert({ name: newCategoryName.trim(), color: newCategoryColor, user_id: (await supabase.auth.getUser()).data.user!.id });
       if (error) throw error;
       toast.success(`Kategoria "${newCategoryName.trim()}" dodana`);
       setNewCategoryName("");
