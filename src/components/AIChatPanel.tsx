@@ -133,6 +133,7 @@ export default function AIChatPanel({ meetingId, meetingTitle }: AIChatPanelProp
     try {
       await streamChat({
         messages: updated,
+        meetingId,
         onDelta: upsert,
         onDone: () => setLoading(false),
         onError: (msg) => { setError(msg); setLoading(false); },
