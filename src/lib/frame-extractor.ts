@@ -103,7 +103,8 @@ export async function uploadFrames(
   const paths: string[] = [];
 
   for (let i = 0; i < frames.length; i++) {
-    const path = `${userId}/frames/${recordingStem}/frame_${String(i + 1).padStart(3, "0")}.jpg`;
+    const secs = Math.round(frames[i].timestamp);
+    const path = `${userId}/frames/${recordingStem}/frame_${secs}s.jpg`;
     const { error } = await supabase.storage
       .from("recordings")
       .upload(path, frames[i].blob, {
