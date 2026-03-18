@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Download, Image, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Download, Image, Loader2, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import FrameRegenerator from "@/components/FrameRegenerator";
@@ -105,6 +105,22 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
+  async function handleDelete(seg: SegmentFile) {
+    if (!confirm(`Usunąć segment "${seg.name}"?`)) return;
+    try {
+      const { error } = await supabase.storage
+        .from("recordings")
+        .remove([seg.path]);
+      if (error) throw error;
+      toast.success(`Usunięto ${seg.name}`);
+      setSegments((prev) => prev.filter((s) => s.path !== seg.path));
+      if (playingIdx !== null) setPlayingIdx(null);
+      if (expandedFrames !== null) setExpandedFrames(null);
+    } catch (err: any) {
+      toast.error("Błąd usuwania: " + (err.message || "nieznany"));
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
@@ -171,6 +187,13 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
                         title="Generuj klatki"
                       >
                         <Image className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(seg)}
+                        className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                        title="Usuń segment"
+                      >
+                        <Trash2 className="w-3 h-3" />
                       </button>
                     </>
                   )}
