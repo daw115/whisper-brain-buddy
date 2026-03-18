@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Brain, FolderOpen, Pencil, Trash2, Check, X } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Users, Tag, Loader2, Brain, FolderOpen, Pencil, Trash2, Check, X, BookOpen } from "lucide-react";
 import { useMeeting, useCategories, useUpdateMeeting, useDeleteMeeting } from "@/hooks/use-meetings";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import FrameGallery from "@/components/FrameGallery";
 import RecordingPanel from "@/components/RecordingPanel";
 import SegmentToolbox from "@/components/SegmentToolbox";
 import { toast } from "sonner";
+import { useBuildKnowledge } from "@/hooks/use-knowledge";
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -28,6 +29,7 @@ export default function MeetingDetail() {
   const queryClient = useQueryClient();
   const updateMeeting = useUpdateMeeting();
   const deleteMeeting = useDeleteMeeting();
+  const buildKnowledge = useBuildKnowledge();
 
   // Editable title state
   const [editingTitle, setEditingTitle] = useState(false);
@@ -312,6 +314,31 @@ export default function MeetingDetail() {
               meetingId={meeting.id}
               onSuccess={() => refetchAnalyses()}
             />
+          </div>
+
+          {/* Build Knowledge */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Baza wiedzy</h2>
+            <button
+              onClick={() => {
+                buildKnowledge.mutate(meeting.id, {
+                  onSuccess: (data) => {
+                    toast.success("Dodano do bazy wiedzy");
+                  },
+                  onError: (err) => {
+                    toast.error("Błąd: " + (err instanceof Error ? err.message : "nieznany"));
+                  },
+                });
+              }}
+              disabled={buildKnowledge.isPending}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-border bg-card hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              {buildKnowledge.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+              {buildKnowledge.isPending ? "Analizuję..." : "Dodaj do bazy wiedzy"}
+            </button>
+            <p className="text-[10px] text-muted-foreground/60 mt-1.5">
+              AI wyciągnie tematy, wzorce zadań i kontekst projektowy.
+            </p>
           </div>
         </div>
 

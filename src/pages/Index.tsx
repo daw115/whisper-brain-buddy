@@ -9,6 +9,7 @@ import ActionsPage from "@/pages/ActionsPage";
 import SearchPage from "@/pages/SearchPage";
 import SettingsPage from "@/pages/SettingsPage";
 import UploadPage from "@/pages/UploadPage";
+import KnowledgePage from "@/pages/KnowledgePage";
 import { useRecorder } from "@/hooks/use-recorder";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useCreateMeeting } from "@/hooks/use-meetings";
@@ -123,6 +124,7 @@ export default function Index() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="actions" element={<ActionsPage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="upload" element={<UploadPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Routes>
