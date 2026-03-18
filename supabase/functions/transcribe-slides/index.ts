@@ -516,13 +516,13 @@ Kolejność: chronologicznie, zgodnie z timestampami. Zwróć tylko opisy dla do
       const slideDescText = slideDescs?.slides?.length > 0
         ? slideDescs.slides
             .map((s: any) => `[${s.timestamp}] 📊 ${s.slide_title}: ${s.content}`)
-            .join("\n")
+            .join("\n").slice(0, 15000)
         : null;
 
       const ocrEntries = captionSource.entries as any[] | undefined;
       const ocrDialogText = ocrEntries && ocrEntries.length > 0
-        ? ocrEntries.map((e: any) => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n")
-        : captionSource.transcript || "Brak";
+        ? ocrEntries.map((e: any) => `[${e.timestamp}] ${e.speaker}: ${e.text}`).join("\n").slice(0, 15000)
+        : captionSource.transcript?.slice(0, 15000) || "Brak";
 
       const aggregatePrompt = `Jesteś ekspertem od analizy spotkań. Masz dane z tego samego spotkania z dwóch niezależnych źródeł + opisy slajdów.
 
