@@ -42,29 +42,43 @@ serve(async (req) => {
       });
     }
 
+    console.log(`Meeting: ${meeting.title}, recording: ${meeting.recording_filename}, user: ${meeting.user_id}`);
+
     // 2. Get frames from storage + deduplicate
-    const frames: { base64: string; timestamp: string }[] = [];
+    const frames: { base64: string; timestamp: string; mimeType: string }[] = [];
     if (meeting.recording_filename) {
       const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
+      console.log(`Looking for frames with stem: "${stem}"`);
 
       // Collect frames from main + segment directories
       const dirPrefixes = [`${meeting.user_id}/frames/${stem}`];
-      const { data: allDirs } = await supabaseAdmin.storage
+      
+      const { data: allDirs, error: dirErr } = await supabaseAdmin.storage
         .from("recordings")
         .list(`${meeting.user_id}/frames`);
+      
+      console.log(`Dirs in frames/: ${allDirs?.length ?? 0} entries, error: ${dirErr?.message ?? 'none'}`);
+      
       if (allDirs) {
         for (const d of allDirs) {
-          if (d.name.startsWith(stem + "_part") && d.id) {
+          console.log(`  dir entry: name="${d.name}", id=${d.id}`);
+          // FIX: Don't require d.id — folders in Supabase Storage have id=null
+          if (d.name.startsWith(stem + "_part")) {
             dirPrefixes.push(`${meeting.user_id}/frames/${d.name}`);
           }
         }
       }
 
+      console.log(`Searching ${dirPrefixes.length} frame directories: ${dirPrefixes.map(p => p.split('/').pop()).join(', ')}`);
+
       const allFrameFiles: { path: string; timestamp: number }[] = [];
       for (const prefix of dirPrefixes) {
-        const { data: files } = await supabaseAdmin.storage
+        const { data: files, error: listErr } = await supabaseAdmin.storage
           .from("recordings")
-          .list(prefix, { limit: 50, sortBy: { column: "name", order: "asc" } });
+          .list(prefix, { limit: 100, sortBy: { column: "name", order: "asc" } });
+        
+        console.log(`  ${prefix.split('/').pop()}: ${files?.length ?? 0} files, error: ${listErr?.message ?? 'none'}`);
+        
         if (files) {
           for (const file of files) {
             if (!file.name.match(/\.(jpg|jpeg|png)$/i)) continue;
@@ -74,7 +88,9 @@ serve(async (req) => {
           }
         }
       }
+      
       allFrameFiles.sort((a, b) => a.timestamp - b.timestamp);
+      console.log(`Found ${allFrameFiles.length} total frame files`);
 
       // Download and deduplicate frames using simple hash
       const seenHashes = new Set<string>();
@@ -82,7 +98,10 @@ serve(async (req) => {
         const { data } = await supabaseAdmin.storage
           .from("recordings")
           .download(ff.path);
-        if (!data) continue;
+        if (!data) {
+          console.log(`  Failed to download: ${ff.path}`);
+          continue;
+        }
 
         const arrayBuffer = await data.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
@@ -98,14 +117,18 @@ serve(async (req) => {
         seenHashes.add(hashStr);
 
         const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
+        const isJpeg = ff.path.match(/\.jpe?g$/i);
+        const mimeType = isJpeg ? "image/jpeg" : "image/png";
         const secs = ff.timestamp;
         const mins = Math.floor(secs / 60);
         const s = secs % 60;
-        frames.push({ base64, timestamp: `${mins}:${String(s).padStart(2, "0")}` });
+        frames.push({ base64, mimeType, timestamp: `${mins}:${String(s).padStart(2, "0")}` });
 
         if (frames.length >= 20) break;
       }
       console.log(`Loaded ${frames.length} unique frames (deduped from ${allFrameFiles.length})`);
+    } else {
+      console.log("No recording_filename — skipping frame loading");
     }
 
     // 3. Build transcript
@@ -113,40 +136,77 @@ serve(async (req) => {
     const sorted = [...transcriptLines].sort((a: any, b: any) => a.line_order - b.line_order);
     const transcriptText = sorted.length > 0
       ? sorted.map((l: any) => `[${l.timestamp}] ${l.speaker}: ${l.text}`).join("\n")
-      : "(Brak transkryptu — przeanalizuj treść slajdów i kontekst wizualny)";
+      : "";
 
-    // 4. Build multimodal content
+    const hasTranscript = transcriptText.length > 0;
+    const hasSlides = frames.length > 0;
+
+    console.log(`Analysis input: transcript=${hasTranscript} (${sorted.length} lines, ${transcriptText.length} chars), slides=${hasSlides} (${frames.length})`);
+
+    // 4. Build multimodal content with improved prompt
     const contentParts: any[] = [];
+    
+    let contextDescription = "";
+    if (hasTranscript && hasSlides) {
+      contextDescription = `Masz do dyspozycji TRANSKRYPT rozmowy (${sorted.length} linii) oraz ${frames.length} SLAJDÓW z prezentacji.`;
+    } else if (hasSlides) {
+      contextDescription = `Masz do dyspozycji ${frames.length} SLAJDÓW z prezentacji (brak transkryptu — opisz zawartość wizualną).`;
+    } else if (hasTranscript) {
+      contextDescription = `Masz do dyspozycji TRANSKRYPT rozmowy (${sorted.length} linii, brak slajdów).`;
+    } else {
+      contextDescription = "Brak danych wejściowych.";
+    }
+
     contentParts.push({
       type: "text",
-      text: `Jesteś asystentem AI Cerebro analizującym spotkania biznesowe.
+      text: `Jesteś ekspertem AI do analizy spotkań biznesowych w systemie Cerebro.
 
-Masz do dyspozycji:
-- Transkrypt rozmowy (jeśli dostępny)
-- ${frames.length} unikalnych klatek/slajdów z prezentacji (duplikaty zostały usunięte)
+${contextDescription}
 
-WAŻNE: Każdy slajd ma znacznik czasu (@ MM:SS) odpowiadający momentowi prezentacji.
-Dopasuj treść slajdów do odpowiednich fragmentów transkryptu na podstawie tych znaczników czasowych.
-W analizie wskaż, które slajdy odnoszą się do których części dyskusji.
+## TWOJE ZADANIE
 
-TRANSKRYPT:
+### 1. ANALIZA SLAJDÓW (jeśli dostępne)
+Dla KAŻDEGO slajdu:
+- Odczytaj CAŁĄ widoczną treść (tytuły, punkty, dane, wykresy, tabele)
+- Zanotuj co dokładnie przedstawia slajd
+- Powiąż go z odpowiednim fragmentem dyskusji na podstawie znacznika czasowego
+
+### 2. KORELACJA SLAJD ↔ DIALOG
+- Dopasuj każdy slajd do fragmentu transkryptu, który go omawia
+- Wyciągnij CO mówili uczestnicy O danym slajdzie — ich komentarze, pytania, wątpliwości
+- Zidentyfikuj dodatkowy kontekst z rozmowy, którego NIE MA na slajdach
+
+### 3. PODSUMOWANIE
+Napisz zwięzłe ale kompletne podsumowanie (3-6 zdań) obejmujące:
+- Główny temat i cel spotkania
+- Kluczowe ustalenia i decyzje
+- Ważne dane liczbowe ze slajdów
+- Wnioski i następne kroki
+
+### 4. ZADANIA I DECYZJE
+- Wyodrębnij KONKRETNE zadania do wykonania (kto, co, kiedy)
+- Zapisz DECYZJE podjęte podczas spotkania z uzasadnieniem
+
+${hasTranscript ? `## TRANSKRYPT:
 ---
 ${transcriptText.slice(0, 15000)}
----
+---` : "## (Brak transkryptu)"}
 
-Poniżej klatki slajdów z prezentacji (posortowane chronologicznie, bez duplikatów):`,
+${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności chronologicznej:` : ""}`,
     });
 
     for (const frame of frames) {
       contentParts.push({ type: "text", text: `\n--- Slajd @ ${frame.timestamp} ---` });
       contentParts.push({
         type: "image_url",
-        image_url: { url: `data:image/jpeg;base64,${frame.base64}` },
+        image_url: { url: `data:${frame.mimeType};base64,${frame.base64}` },
       });
     }
 
-    if (frames.length === 0) {
-      contentParts.push({ type: "text", text: "\n(Brak klatek — analiza oparta na transkrypcie)" });
+    if (!hasTranscript && !hasSlides) {
+      return new Response(JSON.stringify({ error: "Brak danych do analizy — dodaj transkrypt lub wygeneruj klatki" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // 5. Call Gemini with tool calling
@@ -163,23 +223,41 @@ Poniżej klatki slajdów z prezentacji (posortowane chronologicznie, bez duplika
           type: "function",
           function: {
             name: "save_meeting_analysis",
-            description: "Save structured meeting analysis",
+            description: "Save structured meeting analysis with slide-dialogue correlation",
             parameters: {
               type: "object",
               properties: {
-                summary: { type: "string", description: "Podsumowanie 2-4 zdania po polsku" },
-                sentiment: { type: "string", enum: ["pozytywny", "neutralny", "negatywny", "mieszany"] },
-                participants: { type: "array", items: { type: "string" } },
-                tags: { type: "array", items: { type: "string" }, description: "Max 5 tagów" },
-                key_quotes: { type: "array", items: { type: "string" } },
+                summary: { 
+                  type: "string", 
+                  description: "Kompletne podsumowanie 3-6 zdań po polsku. Zawiera główny temat, kluczowe ustalenia, dane liczbowe ze slajdów i wnioski." 
+                },
+                sentiment: { 
+                  type: "string", 
+                  enum: ["pozytywny", "neutralny", "negatywny", "mieszany"] 
+                },
+                participants: { 
+                  type: "array", 
+                  items: { type: "string" },
+                  description: "Lista uczestników zidentyfikowanych z transkryptu"
+                },
+                tags: { 
+                  type: "array", 
+                  items: { type: "string" }, 
+                  description: "3-7 tagów tematycznych" 
+                },
+                key_quotes: { 
+                  type: "array", 
+                  items: { type: "string" },
+                  description: "Najważniejsze cytaty z dyskusji (dokładne słowa uczestników)"
+                },
                 action_items: {
                   type: "array",
                   items: {
                     type: "object",
                     properties: {
-                      task: { type: "string" },
-                      owner: { type: "string" },
-                      deadline: { type: "string" },
+                      task: { type: "string", description: "Konkretne zadanie do wykonania" },
+                      owner: { type: "string", description: "Osoba odpowiedzialna" },
+                      deadline: { type: "string", description: "Termin realizacji (jeśli podano)" },
                     },
                     required: ["task", "owner"],
                     additionalProperties: false,
@@ -190,9 +268,9 @@ Poniżej klatki slajdów z prezentacji (posortowane chronologicznie, bez duplika
                   items: {
                     type: "object",
                     properties: {
-                      decision: { type: "string" },
-                      rationale: { type: "string" },
-                      timestamp: { type: "string" },
+                      decision: { type: "string", description: "Podjęta decyzja" },
+                      rationale: { type: "string", description: "Uzasadnienie lub kontekst decyzji" },
+                      timestamp: { type: "string", description: "Przybliżony moment podjęcia decyzji (MM:SS)" },
                     },
                     required: ["decision"],
                     additionalProperties: false,
@@ -203,16 +281,17 @@ Poniżej klatki slajdów z prezentacji (posortowane chronologicznie, bez duplika
                   items: {
                     type: "object",
                     properties: {
-                      slide_timestamp: { type: "string" },
-                      slide_content: { type: "string" },
-                      discussion_context: { type: "string" },
+                      slide_timestamp: { type: "string", description: "Znacznik czasowy slajdu (MM:SS)" },
+                      slide_content: { type: "string", description: "Pełna treść odczytana ze slajdu (tytuły, punkty, dane)" },
+                      discussion_context: { type: "string", description: "Co mówili uczestnicy o tym slajdzie — komentarze, pytania, dodatkowy kontekst z dyskusji" },
                     },
                     required: ["slide_content"],
                     additionalProperties: false,
                   },
+                  description: "Analiza każdego slajdu z korelacją do fragmentów dyskusji"
                 },
               },
-              required: ["summary", "sentiment", "tags", "action_items", "decisions"],
+              required: ["summary", "sentiment", "tags", "action_items", "decisions", "slide_insights"],
               additionalProperties: false,
             },
           },
@@ -242,19 +321,67 @@ Poniżej klatki slajdów z prezentacji (posortowane chronologicznie, bez duplika
     const aiResult = await response.json();
     const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
+      console.error("AI response without tool call:", JSON.stringify(aiResult).slice(0, 500));
       return new Response(JSON.stringify({ error: "AI did not return structured analysis" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const analysis = JSON.parse(toolCall.function.arguments);
+    console.log(`Analysis result: summary=${analysis.summary?.length ?? 0} chars, actions=${analysis.action_items?.length ?? 0}, decisions=${analysis.decisions?.length ?? 0}, slides=${analysis.slide_insights?.length ?? 0}`);
 
-    // 6. Save to meeting_analyses table (source: gemini)
+    // 6. Save to meeting_analyses table
     await supabase.from("meeting_analyses").insert({
       meeting_id: meetingId,
       source: "gemini",
       analysis_json: analysis,
     });
+
+    // 7. Update meeting summary + tags
+    const updatePayload: any = {};
+    if (analysis.summary) updatePayload.summary = analysis.summary;
+    if (analysis.tags?.length) updatePayload.tags = analysis.tags;
+    if (Object.keys(updatePayload).length > 0) {
+      await supabase.from("meetings").update(updatePayload).eq("id", meetingId);
+    }
+
+    // 8. Save action items to dedicated table
+    if (analysis.action_items?.length > 0) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const items = analysis.action_items.map((ai: any) => ({
+          meeting_id: meetingId,
+          user_id: user.id,
+          task: ai.task,
+          owner: ai.owner || "Nieprzypisane",
+          deadline: ai.deadline || null,
+        }));
+        await supabase.from("action_items").insert(items);
+      }
+    }
+
+    // 9. Save decisions to dedicated table
+    if (analysis.decisions?.length > 0) {
+      const decisionRows = analysis.decisions.map((d: any) => ({
+        meeting_id: meetingId,
+        decision: d.decision,
+        rationale: d.rationale || null,
+        timestamp: d.timestamp || null,
+      }));
+      await supabase.from("decisions").insert(decisionRows);
+    }
+
+    // 10. Save participants
+    if (analysis.participants?.length > 0) {
+      const existingParticipants = meeting.meeting_participants || [];
+      const existingNames = new Set((existingParticipants as any[]).map((p: any) => p.name?.toLowerCase()));
+      const newParticipants = analysis.participants
+        .filter((name: string) => !existingNames.has(name.toLowerCase()))
+        .map((name: string) => ({ meeting_id: meetingId, name }));
+      if (newParticipants.length > 0) {
+        await supabase.from("meeting_participants").insert(newParticipants);
+      }
+    }
 
     return new Response(JSON.stringify({ success: true, analysis }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
