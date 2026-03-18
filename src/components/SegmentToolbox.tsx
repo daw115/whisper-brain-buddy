@@ -690,6 +690,7 @@ export default function SegmentToolbox({
       setBatchProgress({ current: 0, total: parts.length, percent: 0 });
 
       for (let i = 0; i < parts.length; i++) {
+        if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
         const partFilename = `${segStem}_sub${i + 1}${ext}`;
         const path = `${user.id}/${partFilename}`;
         const partBlob = new Blob([new Uint8Array(parts[i].data)], { type: blob.type || "video/webm" });
