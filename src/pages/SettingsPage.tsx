@@ -97,6 +97,28 @@ export default function SettingsPage() {
     }
   };
 
+  const changePin = async (userId: string) => {
+    if (editingPinValue.length !== 4 || !/^\d{4}$/.test(editingPinValue)) {
+      toast.error("PIN musi mieć 4 cyfry");
+      return;
+    }
+    setSavingPin(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-pin-user", {
+        body: { action: "change_pin", user_id: userId, pin_code: editingPinValue },
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+      toast.success("PIN zmieniony");
+      setEditingPinId(null);
+      setEditingPinValue("");
+      loadPinUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Nie udało się zmienić PIN-u");
+    } finally {
+      setSavingPin(false);
+    }
+  };
+
   const deletePinUser = async (user: PinUser) => {
     if (!confirm(`Usunąć użytkownika ${user.name}?`)) return;
     try {
