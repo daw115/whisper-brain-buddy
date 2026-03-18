@@ -205,7 +205,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
     }
   }
 
-  async function runStep(mode: string) {
+  async function runStep(mode: string, startOffset = 0) {
     if (mode === "crop-split") {
       return runLocalDedup();
     }
@@ -217,7 +217,7 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
     try {
       const isBatchedMode = mode === "ocr-captions" || mode === "describe-slides";
       const requestedBatchSize = mode === "ocr-captions" ? 12 : mode === "describe-slides" ? 8 : null;
-      let nextOffset = 0;
+      let nextOffset = startOffset;
       let latestResults: any = null;
 
       while (true) {
@@ -252,11 +252,15 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
         nextOffset = partial.next_offset;
       }
 
+      // Clear resume info for completed step
+      setResumeInfo(prev => { const n = { ...prev }; delete n[mode]; return n; });
       onComplete?.(latestResults ?? {});
       toast.success(`Krok ${stepConfig[mode as keyof typeof stepConfig]?.stepNum}: gotowe!`);
     } catch (err: any) {
       setError(err.message || "Nieznany błąd");
       toast.error("Błąd: " + (err.message || "nieznany"));
+      // Refresh resume info after error
+      loadExistingProgress();
     } finally {
       setRunningStep("idle");
       setBatchProgress(null);
@@ -295,27 +299,43 @@ export default function SlideTranscriptionButton({ meetingId, hasFrames, recordi
         const status = getStepStatus(step);
         const isThisRunning = runningStep === step;
         const disabled = isRunning || !hasFrames;
+        const resume = resumeInfo[step];
 
         return (
           <div key={step} className="space-y-0.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => runStep(step)}
-              disabled={disabled}
-              className="w-full justify-start gap-2 text-xs h-8"
-            >
-              {isThisRunning ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
-              ) : status ? (
-                <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-              ) : (
-                <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => runStep(step)}
+                disabled={disabled}
+                className="flex-1 justify-start gap-2 text-xs h-8"
+              >
+                {isThisRunning ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                ) : status ? (
+                  <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                ) : (
+                  <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                )}
+                <span>
+                  {config.stepNum}. {isThisRunning ? `${config.label}…` : config.label}
+                </span>
+              </Button>
+              {resume && !isRunning && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => runStep(step, resume.next_offset)}
+                  disabled={disabled}
+                  className="gap-1 text-xs h-8 px-2"
+                  title={`Wznów od ${resume.label}`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Wznów ({resume.label})
+                </Button>
               )}
-              <span>
-                {config.stepNum}. {isThisRunning ? `${config.label}…` : config.label}
-              </span>
-            </Button>
+            </div>
             {isThisRunning && batchProgress && (
               <p className="text-[9px] text-muted-foreground pl-6 animate-pulse">⏳ {batchProgress}</p>
             )}
