@@ -130,7 +130,19 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
     );
   }
 
-  if (frames.length === 0) return null;
+  if (frames.length === 0) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider">
+          <Image className="w-3 h-3" />
+          Klatki (0)
+        </div>
+        <p className="text-[11px] text-muted-foreground/70 italic">
+          Brak klatek — wygeneruj je w sekcji Narzędzia
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>
