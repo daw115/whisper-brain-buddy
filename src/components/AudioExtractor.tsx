@@ -434,6 +434,7 @@ export default function AudioExtractor({
 
     let allLines: { timestamp: string; speaker: string; text: string }[] = [];
     let globalLineOrder = 0;
+    let cumulativeOffsetSec = 0;
 
     // Load Whisper model once if offline mode
     let transcriber: any = null;
@@ -470,19 +471,29 @@ export default function AudioExtractor({
 
         let lines: { timestamp: string; speaker: string; text: string }[] = [];
 
+        // Get segment duration for cumulative offset
+        let segmentDurationSec = 0;
+        try {
+          const durCtx = new AudioContext({ sampleRate: 16000 });
+          const durBuf = await durCtx.decodeAudioData(bytes.buffer.slice(0));
+          segmentDurationSec = durBuf.duration;
+          await durCtx.close();
+        } catch { /* fallback: offset won't advance if decode fails */ }
+
         if (transcribeMode === "online") {
           // Gemini via edge function
           const sizeMB = bytes.length / (1024 * 1024);
           if (sizeMB > 20) {
             toast.warning(`Segment ${i + 1} za duży (${sizeMB.toFixed(1)} MB) — pominięto`, { id: "batch-transcribe" });
+            cumulativeOffsetSec += segmentDurationSec;
             continue;
           }
           const base64 = uint8ToBase64(bytes);
           const { data, error } = await supabase.functions.invoke("transcribe-audio", {
             body: { audioBase64: base64, mimeType: "audio/mpeg", language, frames: cachedFrames.length > 0 ? cachedFrames : undefined },
           });
-          if (error) { console.error(`Seg ${i + 1}:`, error); continue; }
-          if (data?.error) { console.error(`Seg ${i + 1}:`, data.error); toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" }); continue; }
+          if (error) { console.error(`Seg ${i + 1}:`, error); cumulativeOffsetSec += segmentDurationSec; continue; }
+          if (data?.error) { console.error(`Seg ${i + 1}:`, data.error); toast.warning(`Segment ${i + 1}: ${data.error}`, { id: "batch-transcribe" }); cumulativeOffsetSec += segmentDurationSec; continue; }
           lines = (data?.lines || []).map((l: any) => ({
             timestamp: l.timestamp || "00:00",
             speaker: l.speaker || "Mówca",
@@ -493,6 +504,7 @@ export default function AudioExtractor({
           const audioCtx = new AudioContext({ sampleRate: 16000 });
           const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
           const channelData = audioBuffer.getChannelData(0);
+          segmentDurationSec = audioBuffer.duration;
           await audioCtx.close();
 
           const result = await transcriber(channelData, {
@@ -521,6 +533,17 @@ export default function AudioExtractor({
           }
         }
 
+        // Apply cumulative offset to timestamps
+        if (cumulativeOffsetSec > 0 && lines.length > 0) {
+          lines = lines.map(l => {
+            const parts = l.timestamp.split(":").map(Number);
+            const totalSec = (parts[0] || 0) * 60 + (parts[1] || 0) + Math.round(cumulativeOffsetSec);
+            const m = Math.floor(totalSec / 60);
+            const s = totalSec % 60;
+            return { ...l, timestamp: `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` };
+          });
+        }
+
         if (lines.length > 0) {
           const rows = lines.map((line: any) => ({
             meeting_id: meetingId,
@@ -533,6 +556,8 @@ export default function AudioExtractor({
           if (insertError) console.error(`Seg ${i + 1} insert:`, insertError);
           allLines.push(...lines);
         }
+
+        cumulativeOffsetSec += segmentDurationSec;
 
         // Delay for online mode to avoid rate limiting
         if (transcribeMode === "online" && i < segsWithUrl.length - 1) {
