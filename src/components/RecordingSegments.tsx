@@ -163,29 +163,39 @@ export default function RecordingSegments({ recordingFilename, meetingId, onFram
     setTranscribePhase("converting");
 
     try {
-      toast.loading(`Konwersja segmentu #${idx + 1} do WAV…`, { id: `trans-${idx}` });
+      toast.loading(`Pobieranie segmentu #${idx + 1}…`, { id: `trans-${idx}` });
 
-      // Convert to PCM f32le 16kHz mono via FFmpeg
-      const { fetchFile } = await import("@ffmpeg/util");
-      const ffmpeg = await getFFmpeg();
+      // Download the segment as ArrayBuffer
+      const response = await fetch(seg.signedUrl);
+      if (!response.ok) throw new Error(`Błąd pobierania: ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
 
-      const videoData = await fetchFile(seg.signedUrl);
-      const inputName = `trans_input_${idx}.webm`;
-      const outputName = `trans_output_${idx}.pcm`;
-      await ffmpeg.writeFile(inputName, videoData);
+      let audioData: Float32Array;
 
-      await ffmpeg.exec([
-        "-i", inputName,
-        "-vn", "-ar", "16000", "-ac", "1",
-        "-f", "f32le", outputName,
-      ]);
-
-      const rawPcm = await ffmpeg.readFile(outputName);
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-
-      const audioData = new Float32Array((rawPcm as Uint8Array).buffer);
-      console.log(`Segment #${idx + 1}: ${(audioData.length / 16000).toFixed(0)}s PCM audio`);
+      // Try Web Audio API first (Chrome supports webm natively)
+      try {
+        toast.loading(`Dekodowanie audio segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+        audioData = decoded.getChannelData(0);
+        audioCtx.close();
+        console.log(`Segment #${idx + 1}: Web Audio API decoded ${(audioData.length / 16000).toFixed(0)}s`);
+      } catch (webAudioErr) {
+        // Fallback: use FFmpeg WASM
+        console.warn("Web Audio API failed, falling back to FFmpeg:", webAudioErr);
+        toast.loading(`Konwersja FFmpeg segmentu #${idx + 1}…`, { id: `trans-${idx}` });
+        const { fetchFile } = await import("@ffmpeg/util");
+        const ffmpeg = await getFFmpeg();
+        const inputName = `trans_input_${idx}.webm`;
+        const outputName = `trans_output_${idx}.pcm`;
+        await ffmpeg.writeFile(inputName, new Uint8Array(arrayBuffer));
+        await ffmpeg.exec(["-i", inputName, "-vn", "-ar", "16000", "-ac", "1", "-f", "f32le", outputName]);
+        const rawPcm = await ffmpeg.readFile(outputName);
+        await ffmpeg.deleteFile(inputName);
+        await ffmpeg.deleteFile(outputName);
+        audioData = new Float32Array((rawPcm as Uint8Array).buffer);
+        console.log(`Segment #${idx + 1}: FFmpeg decoded ${(audioData.length / 16000).toFixed(0)}s`);
+      }
 
       if (audioData.length === 0) {
         toast.error("Nie udało się wyodrębnić audio z segmentu", { id: `trans-${idx}` });
