@@ -100,12 +100,14 @@ export default function Dashboard({ onStartRecording }: DashboardProps) {
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
                 selectedCategory === cat.id
-                  ? "bg-primary text-primary-foreground"
+                  ? "text-white"
                   : "bg-secondary text-muted-foreground hover:text-foreground"
               }`}
+              style={selectedCategory === cat.id ? { backgroundColor: cat.color } : undefined}
             >
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
               {cat.name}
             </button>
           ))}

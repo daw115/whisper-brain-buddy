@@ -12,9 +12,21 @@ interface PinUser {
   created_at: string;
 }
 
+const CATEGORY_COLORS = [
+  { name: "Indigo", value: "#6366f1" },
+  { name: "Emerald", value: "#10b981" },
+  { name: "Amber", value: "#f59e0b" },
+  { name: "Rose", value: "#f43f5e" },
+  { name: "Cyan", value: "#06b6d4" },
+  { name: "Violet", value: "#8b5cf6" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Teal", value: "#14b8a6" },
+];
+
 interface Category {
   id: string;
   name: string;
+  color: string;
 }
 
 export default function SettingsPage() {
@@ -32,6 +44,7 @@ export default function SettingsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState(CATEGORY_COLORS[0].value);
   const [creatingCategory, setCreatingCategory] = useState(false);
 
   useEffect(() => {
@@ -53,7 +66,7 @@ export default function SettingsPage() {
     setLoadingCategories(true);
     const { data, error } = await supabase
       .from("categories")
-      .select("id, name")
+      .select("id, name, color")
       .order("name");
     if (!error) setCategories(data || []);
     setLoadingCategories(false);
@@ -101,10 +114,11 @@ export default function SettingsPage() {
     try {
       const { error } = await supabase
         .from("categories")
-        .insert({ name: newCategoryName.trim(), user_id: (await supabase.auth.getUser()).data.user!.id });
+        .insert({ name: newCategoryName.trim(), color: newCategoryColor, user_id: (await supabase.auth.getUser()).data.user!.id });
       if (error) throw error;
       toast.success(`Kategoria "${newCategoryName.trim()}" dodana`);
       setNewCategoryName("");
+      setNewCategoryColor(CATEGORY_COLORS[0].value);
       loadCategories();
       queryClient.invalidateQueries({ queryKey: ["categories"] });
     } catch (err: any) {
@@ -229,7 +243,10 @@ export default function SettingsPage() {
               <>
                 {categories.map((cat) => (
                   <div key={cat.id} className="flex items-center justify-between px-5 py-3 border-b border-border last:border-b-0">
-                    <span className="text-sm font-medium text-foreground">{cat.name}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
+                      <span className="text-sm font-medium text-foreground">{cat.name}</span>
+                    </div>
                     <button
                       onClick={() => deleteCategory(cat)}
                       className="text-muted-foreground hover:text-destructive transition-colors"
@@ -246,7 +263,7 @@ export default function SettingsPage() {
               </>
             )}
 
-            <div className="border-t border-border bg-secondary/50 px-5 py-4">
+            <div className="border-t border-border bg-secondary/50 px-5 py-4 space-y-3">
               <div className="flex gap-2">
                 <input
                   value={newCategoryName}
@@ -256,6 +273,17 @@ export default function SettingsPage() {
                   className="flex-1 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
                   maxLength={100}
                 />
+              </div>
+              <div className="flex items-center gap-1.5">
+                {CATEGORY_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    onClick={() => setNewCategoryColor(c.value)}
+                    className={`w-6 h-6 rounded-full transition-all ${newCategoryColor === c.value ? "ring-2 ring-offset-2 ring-offset-secondary scale-110" : "hover:scale-110"}`}
+                    style={{ backgroundColor: c.value }}
+                    title={c.name}
+                  />
+                ))}
                 <button
                   onClick={createCategory}
                   disabled={creatingCategory || !newCategoryName.trim()}

@@ -52,6 +52,7 @@ export type DbParticipant = {
 export type DbCategory = {
   id: string;
   name: string;
+  color: string;
 };
 
 // Full meeting with relations
@@ -103,7 +104,7 @@ export function useCategories() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("categories")
-        .select("id, name")
+        .select("id, name, color")
         .order("name");
       if (error) throw error;
       return data as DbCategory[];
