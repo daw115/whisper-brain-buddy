@@ -293,6 +293,25 @@ export default function MeetingDetail() {
             </>
           )}
 
+          {/* Slide Transcription (OCR) */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Transkrypcja slajdów</h2>
+            <SlideTranscriptionButton
+              meetingId={meeting.id}
+              hasFrames={!!meeting.recording_filename}
+              onComplete={() => refetchAnalyses()}
+            />
+            {/* Show existing slide transcript */}
+            {analyses.filter(a => a.source === "slide-transcript").length > 0 && (
+              <div className="mt-2 p-2 bg-muted/30 rounded border border-border max-h-40 overflow-y-auto">
+                <p className="text-[10px] text-muted-foreground mb-1">📄 Transkrypcja wizualna ({analyses.filter(a => a.source === "slide-transcript")[0].analysis_json?.total_slides || "?"} slajdów)</p>
+                <pre className="text-[9px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed">
+                  {analyses.filter(a => a.source === "slide-transcript")[0].analysis_json?.slide_transcript?.slice(0, 2000) || "Brak danych"}
+                </pre>
+              </div>
+            )}
+          </div>
+
           {/* Gemini Analysis */}
           <div className="mt-6 pt-4 border-t border-border">
             <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Analiza Gemini</h2>
@@ -303,6 +322,9 @@ export default function MeetingDetail() {
               framesVersion={framesVersion}
               onComplete={() => refetchAnalyses()}
             />
+            {analyses.filter(a => a.source === "slide-transcript").length > 0 && (
+              <p className="text-[9px] text-primary/70 mt-1">✓ Transkrypcja slajdów dostępna — Gemini połączy oba źródła</p>
+            )}
           </div>
 
           {/* ChatGPT Analysis Kit */}
