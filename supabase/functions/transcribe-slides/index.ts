@@ -278,9 +278,9 @@ serve(async (req) => {
         const ocrParts: any[] = [
           {
             type: "text",
-            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} wyciętych pasków z napisami (live captions) z nagrania spotkania Teams.
+            text: `Jesteś ekspertem OCR. Poniżej ${batch.length} screenów z nagrania spotkania Teams.
 
-Każdy obrazek to DOLNY pasek ekranu z ciemnym tłem, zawierający napisy/subtitles.
+Na DOLE każdego ekranu znajduje się ciemny pasek z napisami (live captions/subtitles). Zignoruj resztę ekranu (prezentację) — skupiaj się WYŁĄCZNIE na dolnym pasku z napisami.
 
 ## ZADANIE
 1. Odczytaj tekst z każdego paska
