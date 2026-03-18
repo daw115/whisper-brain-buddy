@@ -302,6 +302,7 @@ export default function MeetingDetail() {
             <SlideTranscriptionButton
               meetingId={meeting.id}
               hasFrames={!!meeting.recording_filename}
+              recordingFilename={meeting.recording_filename || ""}
               onComplete={() => refetchAnalyses()}
             />
           </div>
