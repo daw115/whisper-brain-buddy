@@ -114,12 +114,23 @@ export default function AudioExtractor({
       if (!signed) { setCachedFrames([]); return; }
 
       const frames: { base64: string; timestamp: string }[] = [];
+      const seenHashes = new Set<string>();
       for (let i = 0; i < signed.length; i++) {
         if (!signed[i].signedUrl) continue;
         try {
           const res = await fetch(signed[i].signedUrl);
           const blob = await res.blob();
           const bytes = new Uint8Array(await blob.arrayBuffer());
+          // Deduplicate: simple hash of first 2KB of image data
+          const hashSlice = bytes.slice(0, 2048);
+          let hash = 0;
+          for (let j = 0; j < hashSlice.length; j += 4) {
+            hash = ((hash << 5) - hash + hashSlice[j]) | 0;
+          }
+          const hashStr = hash.toString(36);
+          if (seenHashes.has(hashStr)) continue;
+          seenHashes.add(hashStr);
+
           const secs = selected[i].timestamp;
           const mins = Math.floor(secs / 60);
           const s = secs % 60;
@@ -127,7 +138,7 @@ export default function AudioExtractor({
         } catch { /* skip */ }
       }
       setCachedFrames(frames);
-      console.log(`Loaded ${frames.length} frames for visual context`);
+      console.log(`Loaded ${frames.length} unique frames for visual context (deduped from ${signed.length})`);
     } catch (err) {
       console.error("Load frames for context error:", err);
       setCachedFrames([]);

@@ -72,6 +72,8 @@ Zasady:
 - Zachowaj naturalną interpunkcję
 - Oznacz niezrozumiałe fragmenty jako [niezrozumiałe]
 - Jeśli są dźwięki tła, zaznacz je w nawiasach kwadratowych np. [śmiech], [cisza]${frameNote}
+${hasFrames ? `- Każdy slajd ma znacznik czasu — dopasuj treść slajdu do odpowiedniego momentu w transkrypcji
+- Jeśli mówca omawia treść slajdu, zaznacz to w transkrypcji np. [slajd @ MM:SS]` : ""}
 
 Zwróć transkrypcję jako strukturyzowane dane.`,
               });

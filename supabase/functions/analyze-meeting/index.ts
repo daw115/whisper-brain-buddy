@@ -42,36 +42,70 @@ serve(async (req) => {
       });
     }
 
-    // 2. Get frames from storage
+    // 2. Get frames from storage + deduplicate
     const frames: { base64: string; timestamp: string }[] = [];
     if (meeting.recording_filename) {
       const stem = meeting.recording_filename.replace(/\.[^.]+$/, "");
-      const prefix = `${meeting.user_id}/frames/${stem}`;
 
-      const { data: files } = await supabaseAdmin.storage
+      // Collect frames from main + segment directories
+      const dirPrefixes = [`${meeting.user_id}/frames/${stem}`];
+      const { data: allDirs } = await supabaseAdmin.storage
         .from("recordings")
-        .list(`${meeting.user_id}/frames/${stem}`, { limit: 50, sortBy: { column: "name", order: "asc" } });
-
-      if (files?.length) {
-        for (const file of files.slice(0, 20)) {
-          const path = `${prefix}/${file.name}`;
-          const { data } = await supabaseAdmin.storage
-            .from("recordings")
-            .download(path);
-          if (data) {
-            const arrayBuffer = await data.arrayBuffer();
-            const base64 = btoa(
-              new Uint8Array(arrayBuffer).reduce((s, b) => s + String.fromCharCode(b), "")
-            );
-            const match = file.name.match(/frame_(\d+)/);
-            const num = match ? parseInt(match[1]) : 0;
-            const secs = num * 30;
-            const mins = Math.floor(secs / 60);
-            const s = secs % 60;
-            frames.push({ base64, timestamp: `${mins}:${String(s).padStart(2, "0")}` });
+        .list(`${meeting.user_id}/frames`);
+      if (allDirs) {
+        for (const d of allDirs) {
+          if (d.name.startsWith(stem + "_part") && d.id) {
+            dirPrefixes.push(`${meeting.user_id}/frames/${d.name}`);
           }
         }
       }
+
+      const allFrameFiles: { path: string; timestamp: number }[] = [];
+      for (const prefix of dirPrefixes) {
+        const { data: files } = await supabaseAdmin.storage
+          .from("recordings")
+          .list(prefix, { limit: 50, sortBy: { column: "name", order: "asc" } });
+        if (files) {
+          for (const file of files) {
+            if (!file.name.match(/\.(jpg|jpeg|png)$/i)) continue;
+            const match = file.name.match(/frame_(\d+)/);
+            const ts = match ? parseInt(match[1]) : 0;
+            allFrameFiles.push({ path: `${prefix}/${file.name}`, timestamp: ts });
+          }
+        }
+      }
+      allFrameFiles.sort((a, b) => a.timestamp - b.timestamp);
+
+      // Download and deduplicate frames using simple hash
+      const seenHashes = new Set<string>();
+      for (const ff of allFrameFiles.slice(0, 30)) {
+        const { data } = await supabaseAdmin.storage
+          .from("recordings")
+          .download(ff.path);
+        if (!data) continue;
+
+        const arrayBuffer = await data.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+
+        // Simple perceptual hash on first 2KB
+        let hash = 0;
+        const slice = bytes.slice(0, 2048);
+        for (let j = 0; j < slice.length; j += 4) {
+          hash = ((hash << 5) - hash + slice[j]) | 0;
+        }
+        const hashStr = hash.toString(36);
+        if (seenHashes.has(hashStr)) continue;
+        seenHashes.add(hashStr);
+
+        const base64 = btoa(bytes.reduce((s, b) => s + String.fromCharCode(b), ""));
+        const secs = ff.timestamp;
+        const mins = Math.floor(secs / 60);
+        const s = secs % 60;
+        frames.push({ base64, timestamp: `${mins}:${String(s).padStart(2, "0")}` });
+
+        if (frames.length >= 20) break;
+      }
+      console.log(`Loaded ${frames.length} unique frames (deduped from ${allFrameFiles.length})`);
     }
 
     // 3. Build transcript
