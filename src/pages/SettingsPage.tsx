@@ -118,6 +118,7 @@ export default function SettingsPage() {
       if (error) throw error;
       toast.success(`Kategoria "${newCategoryName.trim()}" dodana`);
       setNewCategoryName("");
+      setNewCategoryColor(CATEGORY_COLORS[0].value);
       loadCategories();
       queryClient.invalidateQueries({ queryKey: ["categories"] });
     } catch (err: any) {
