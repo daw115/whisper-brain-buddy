@@ -360,19 +360,31 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
     const analysis = JSON.parse(toolCall.function.arguments);
     console.log(`Analysis result: summary=${analysis.summary?.length ?? 0} chars, actions=${analysis.action_items?.length ?? 0}, decisions=${analysis.decisions?.length ?? 0}, slides=${analysis.slide_insights?.length ?? 0}`);
 
+    // Retry helper for transient DB errors
+    async function dbRetry<T>(fn: () => Promise<{ error: any; data?: T }>, label: string) {
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const { error } = await fn();
+        if (!error) return;
+        console.error(`${label} failed (attempt ${attempt}/${maxRetries}):`, error);
+        if (attempt < maxRetries) await new Promise(r => setTimeout(r, 1000 * attempt));
+        else console.error(`${label} failed after ${maxRetries} attempts, continuing...`);
+      }
+    }
+
     // 6. Save to meeting_analyses table
-    await supabase.from("meeting_analyses").insert({
+    await dbRetry(() => supabase.from("meeting_analyses").insert({
       meeting_id: meetingId,
       source: "gemini",
       analysis_json: analysis,
-    });
+    }), "save analysis");
 
     // 7. Update meeting summary + tags
     const updatePayload: any = {};
     if (analysis.summary) updatePayload.summary = analysis.summary;
     if (analysis.tags?.length) updatePayload.tags = analysis.tags;
     if (Object.keys(updatePayload).length > 0) {
-      await supabase.from("meetings").update(updatePayload).eq("id", meetingId);
+      await dbRetry(() => supabase.from("meetings").update(updatePayload).eq("id", meetingId), "update meeting");
     }
 
     // 8. Save action items to dedicated table
@@ -386,7 +398,7 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
           owner: ai.owner || "Nieprzypisane",
           deadline: ai.deadline || null,
         }));
-        await supabase.from("action_items").insert(items);
+        await dbRetry(() => supabase.from("action_items").insert(items), "save action_items");
       }
     }
 
@@ -398,7 +410,7 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
         rationale: d.rationale || null,
         timestamp: d.timestamp || null,
       }));
-      await supabase.from("decisions").insert(decisionRows);
+      await dbRetry(() => supabase.from("decisions").insert(decisionRows), "save decisions");
     }
 
     // 10. Save participants
@@ -409,7 +421,7 @@ ${hasSlides ? `\nPoniżej ${frames.length} slajdów prezentacji w kolejności ch
         .filter((name: string) => !existingNames.has(name.toLowerCase()))
         .map((name: string) => ({ meeting_id: meetingId, name }));
       if (newParticipants.length > 0) {
-        await supabase.from("meeting_participants").insert(newParticipants);
+        await dbRetry(() => supabase.from("meeting_participants").insert(newParticipants), "save participants");
       }
     }
 
