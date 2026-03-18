@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { extractFrames, uploadFrames } from "@/lib/frame-extractor";
 
 export interface RecordingState {
   isRecording: boolean;
