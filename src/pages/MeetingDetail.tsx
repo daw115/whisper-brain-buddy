@@ -303,14 +303,18 @@ export default function MeetingDetail() {
               onComplete={() => refetchAnalyses()}
             />
             {/* Show existing slide transcript */}
-            {analyses.filter(a => a.source === "slide-transcript").length > 0 && (
-              <div className="mt-2 p-2 bg-muted/30 rounded border border-border max-h-40 overflow-y-auto">
-                <p className="text-[10px] text-muted-foreground mb-1">📄 Transkrypcja wizualna ({analyses.filter(a => a.source === "slide-transcript")[0].analysis_json?.total_slides || "?"} slajdów)</p>
-                <pre className="text-[9px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed">
-                  {analyses.filter(a => a.source === "slide-transcript")[0].analysis_json?.slide_transcript?.slice(0, 2000) || "Brak danych"}
-                </pre>
-              </div>
-            )}
+            {analyses.filter(a => a.source === "slide-transcript").length > 0 && (() => {
+              const stAnalysis = analyses.filter(a => a.source === "slide-transcript")[0];
+              const json = stAnalysis.analysis_json as any;
+              return (
+                <div className="mt-2 p-2 bg-muted/30 rounded border border-border max-h-40 overflow-y-auto">
+                  <p className="text-[10px] text-muted-foreground mb-1">📄 Transkrypcja wizualna ({json?.total_slides || "?"} slajdów)</p>
+                  <pre className="text-[9px] text-foreground/80 whitespace-pre-wrap font-mono-data leading-relaxed">
+                    {json?.slide_transcript?.slice(0, 2000) || "Brak danych"}
+                  </pre>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Gemini Analysis */}
