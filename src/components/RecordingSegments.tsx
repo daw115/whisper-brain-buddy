@@ -195,6 +195,7 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
     }
   }
 
+  if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
         <Loader2 className="w-3 h-3 animate-spin" />
@@ -204,6 +205,12 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
   }
 
   if (segments.length === 0) return null;
+
+  const phaseLabels: Record<string, string> = {
+    loading: "Pobieranie",
+    extracting: "Wyodrębnianie",
+    uploading: "Przesyłanie",
+  };
 
   return (
     <div className="space-y-2">
@@ -215,20 +222,85 @@ export default function RecordingSegments({ recordingFilename, onFramesGenerated
           {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           Segmenty ({segments.length})
         </button>
-        {expanded && (
-          <button
-            onClick={handleDeleteAll}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-            title="Usuń wszystkie segmenty"
-          >
-            <Trash2 className="w-3 h-3" />
-            Usuń wszystkie
-          </button>
+        {expanded && !batchGenerating && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDeleteAll}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+              title="Usuń wszystkie segmenty"
+            >
+              <Trash2 className="w-3 h-3" />
+              Usuń wszystkie
+            </button>
+          </div>
         )}
       </div>
 
       {expanded && (
         <div className="space-y-2">
+          {/* Batch frame generation */}
+          <div className="border border-border rounded-md p-3 bg-muted/20 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Images className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <span className="text-[11px] font-medium text-foreground">Klatki ze wszystkich segmentów</span>
+              <span className="text-[10px] text-muted-foreground">co</span>
+              <input
+                type="number"
+                min={1}
+                max={300}
+                value={batchInterval}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value);
+                  if (v >= 1 && v <= 300) setBatchInterval(v);
+                }}
+                disabled={batchGenerating}
+                className="w-14 text-xs bg-muted/50 border border-border rounded px-2 py-0.5 text-foreground text-center"
+              />
+              <span className="text-[10px] text-muted-foreground">sek</span>
+            </div>
+
+            {batchGenerating && batchProgress && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>
+                    Segment {batchProgress.segIdx}/{batchProgress.total} — {phaseLabels[batchProgress.phase] || batchProgress.phase}
+                  </span>
+                  <span className="font-mono">{batchProgress.percent}%</span>
+                </div>
+                <Progress value={((batchProgress.segIdx - 1) / batchProgress.total) * 100 + (batchProgress.percent / batchProgress.total)} className="h-1.5" />
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBatchFrames}
+                disabled={batchGenerating}
+                className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+              >
+                {batchGenerating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Przetwarzanie…
+                  </>
+                ) : (
+                  <>
+                    <Images className="w-3.5 h-3.5" />
+                    Generuj klatki ze wszystkich
+                  </>
+                )}
+              </button>
+              {batchGenerating && (
+                <button
+                  onClick={() => batchAbortRef.current?.abort()}
+                  className="flex items-center gap-1 text-[10px] font-medium text-destructive hover:text-destructive/80 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                  Anuluj
+                </button>
+              )}
+            </div>
+          </div>
+
           {segments.map((seg, idx) => (
             <div key={seg.name} className="border border-border rounded-md overflow-hidden">
               {/* Segment header */}
