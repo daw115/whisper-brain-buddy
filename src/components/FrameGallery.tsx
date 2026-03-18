@@ -163,14 +163,24 @@ export default function FrameGallery({ recordingFilename, version = 0 }: Props) 
   return (
     <>
       <div className="space-y-2">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider hover:text-foreground transition-colors w-full"
-        >
-          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          <Image className="w-3 h-3" />
-          Klatki ({frames.length})
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1.5 text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            <Image className="w-3 h-3" />
+            Klatki ({frames.length})
+          </button>
+          <button
+            onClick={handleDeleteAll}
+            className="flex items-center gap-1 text-[10px] text-destructive/70 hover:text-destructive transition-colors"
+            title="Usuń wszystkie klatki"
+          >
+            <Trash2 className="w-3 h-3" />
+            Wyczyść
+          </button>
+        </div>
 
         {expanded && (
           <div className="grid grid-cols-3 gap-1.5">

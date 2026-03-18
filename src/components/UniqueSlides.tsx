@@ -59,14 +59,39 @@ export default function UniqueSlides({ meetingId, analyses, onDeleted }: Props) 
 
   return (
     <div className="space-y-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors w-full"
-      >
-        <Images className="w-3 h-3 text-primary" />
-        <span className="font-medium text-foreground">{uniqueFramesData.total_unique} unikalnych slajdów</span>
-        {expanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Images className="w-3 h-3 text-primary" />
+          <span className="font-medium text-foreground">{uniqueFramesData.total_unique} unikalnych slajdów</span>
+          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
+        <button
+          onClick={async () => {
+            if (!confirm("Usunąć dane slajdów (unique-frames, captions-ocr, merged)?")) return;
+            const sources = ["unique-frames", "captions-ocr", "merged"];
+            const { error } = await (supabase as any)
+              .from("meeting_analyses")
+              .delete()
+              .eq("meeting_id", meetingId)
+              .in("source", sources);
+            if (error) {
+              toast.error("Błąd: " + error.message);
+            } else {
+              toast.success("Slajdy wyczyszczone");
+              setThumbnails([]);
+              onDeleted?.();
+            }
+          }}
+          className="flex items-center gap-1 text-[10px] text-destructive/70 hover:text-destructive transition-colors"
+          title="Usuń dane slajdów"
+        >
+          <Trash2 className="w-3 h-3" />
+          Wyczyść
+        </button>
+      </div>
 
       {loading ? (
         <p className="text-[9px] text-muted-foreground">Ładowanie miniatur…</p>
