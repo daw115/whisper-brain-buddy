@@ -104,16 +104,57 @@ serve(async (req) => {
 
     const meetingContext = await buildMeetingContext(authHeader, meetingId);
 
+    // Fetch knowledge base context
+    let knowledgeContext = "";
+    try {
+      const kbClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: summaries } = await kbClient
+        .from("knowledge_summaries")
+        .select("summary_text, key_topics, project_context, sentiment, created_at")
+        .order("created_at", { ascending: false })
+        .limit(15);
+      const { data: patterns } = await kbClient
+        .from("task_patterns")
+        .select("pattern_name, keywords, suggested_category, frequency")
+        .order("frequency", { ascending: false })
+        .limit(10);
+      const { data: projects } = await kbClient
+        .from("project_contexts")
+        .select("name, description, keywords, meeting_count")
+        .order("last_activity", { ascending: false })
+        .limit(10);
+
+      if (summaries?.length) {
+        knowledgeContext += "\n\nKNOWLEDGE SUMMARIES:\n" + summaries.map((s: any) =>
+          `- [${s.project_context || "?"}] ${s.summary_text} (topics: ${(s.key_topics || []).join(", ")})`
+        ).join("\n");
+      }
+      if (patterns?.length) {
+        knowledgeContext += "\n\nTASK PATTERNS:\n" + patterns.map((p: any) =>
+          `- "${p.pattern_name}" (×${p.frequency}, category: ${p.suggested_category || "?"})`
+        ).join("\n");
+      }
+      if (projects?.length) {
+        knowledgeContext += "\n\nPROJECT CONTEXTS:\n" + projects.map((p: any) =>
+          `- "${p.name}" (${p.meeting_count} meetings): ${p.description || ""}`
+        ).join("\n");
+      }
+    } catch (e) {
+      console.error("Knowledge context error:", e);
+    }
+
     const scopeNote = meetingId
       ? "You are focused on ONE specific meeting. Answer questions only about this meeting's data below."
-      : "You have access to the user's meeting database. Cite meeting titles and dates when possible.";
+      : "You have access to the user's meeting database and knowledge base. Cite meeting titles and dates when possible.";
 
     const systemPrompt = `You are Cerebro, an AI meeting intelligence assistant. ${scopeNote}
 If you can't find relevant info, say so.
 
 MEETING DATA:
 
-${meetingContext}`;
+${meetingContext}${knowledgeContext}`;
 
     const response = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
