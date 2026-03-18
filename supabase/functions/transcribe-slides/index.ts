@@ -14,7 +14,8 @@ serve(async (req) => {
   }
 
   try {
-    const { meetingId, mode } = await req.json();
+    const body = await req.json();
+    const { meetingId, mode, batchOffset = 0, batchSize = 30 } = body;
     if (!meetingId) throw new Error("meetingId is required");
 
     // mode: "crop-split" | "ocr-captions" | "describe-slides" | "aggregate"
