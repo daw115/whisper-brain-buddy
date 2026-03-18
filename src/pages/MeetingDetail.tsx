@@ -68,7 +68,18 @@ export default function MeetingDetail() {
       const { data } = await supabase.storage
         .from("recordings")
         .createSignedUrl(path, 60 * 60);
-      if (data?.signedUrl) setRecordingUrl(data.signedUrl);
+      if (data?.signedUrl) {
+        setRecordingUrl(data.signedUrl);
+      } else {
+        // Base file may not exist if recording was auto-split; try _part1
+        const stem = meeting.recording_filename.replace(/\.[^.]+$/, "").replace(/_part\d+$/, "");
+        const ext = meeting.recording_filename.match(/\.[^.]+$/)?.[0] || ".webm";
+        const fallbackPath = `${user.id}/${stem}_part1${ext}`;
+        const { data: fb } = await supabase.storage
+          .from("recordings")
+          .createSignedUrl(fallbackPath, 60 * 60);
+        if (fb?.signedUrl) setRecordingUrl(fb.signedUrl);
+      }
     })();
   }, [meeting?.recording_filename]);
 
