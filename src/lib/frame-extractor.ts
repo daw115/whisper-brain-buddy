@@ -9,10 +9,20 @@ export interface ExtractedFrame {
   dataUrl: string;
 }
 
+export interface ProgressInfo {
+  phase: "loading" | "extracting" | "uploading";
+  current: number;
+  total: number;
+  percent: number;
+}
+
+export type ProgressCallback = (info: ProgressInfo) => void;
+
 export async function extractFrames(
   videoBlob: Blob,
   intervalSeconds = 30,
   maxFrames = 30,
+  onProgress?: ProgressCallback,
 ): Promise<ExtractedFrame[]> {
   const url = URL.createObjectURL(videoBlob);
 
@@ -22,12 +32,16 @@ export async function extractFrames(
     video.preload = "auto";
     video.src = url;
 
+    onProgress?.({ phase: "loading", current: 0, total: 1, percent: 0 });
+
     // Wait for metadata
     await new Promise<void>((resolve, reject) => {
       video.onloadedmetadata = () => resolve();
       video.onerror = () => reject(new Error("Failed to load video"));
       setTimeout(() => reject(new Error("Video load timeout")), 30_000);
     });
+
+    onProgress?.({ phase: "loading", current: 1, total: 1, percent: 100 });
 
     const duration = video.duration;
     if (!duration || !isFinite(duration)) return [];
@@ -48,18 +62,25 @@ export async function extractFrames(
     const frames: ExtractedFrame[] = [];
     let prevHash = "";
 
-    for (const ts of timestamps) {
+    for (let i = 0; i < timestamps.length; i++) {
+      const ts = timestamps[i];
+      onProgress?.({
+        phase: "extracting",
+        current: i + 1,
+        total: timestamps.length,
+        percent: Math.round(((i + 1) / timestamps.length) * 100),
+      });
+
       video.currentTime = ts;
       await new Promise<void>((resolve) => {
         video.onseeked = () => resolve();
-        setTimeout(resolve, 3000); // timeout safety
+        setTimeout(resolve, 3000);
       });
 
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0);
 
-      // Simple change detection: compare a small sample of pixels
       const sample = ctx.getImageData(
         Math.floor(canvas.width / 4),
         Math.floor(canvas.height / 4),
@@ -68,7 +89,6 @@ export async function extractFrames(
       );
       const hash = quickHash(sample.data);
 
-      // Skip if frame is too similar to previous (same slide)
       if (hash === prevHash) continue;
       prevHash = hash;
 
@@ -86,7 +106,6 @@ export async function extractFrames(
 /** Quick hash of pixel data for change detection */
 function quickHash(data: Uint8ClampedArray): string {
   let hash = 0;
-  // Sample every 40th byte for speed
   for (let i = 0; i < data.length; i += 40) {
     hash = ((hash << 5) - hash + data[i]) | 0;
   }
@@ -99,10 +118,18 @@ export async function uploadFrames(
   userId: string,
   recordingStem: string,
   frames: ExtractedFrame[],
+  onProgress?: ProgressCallback,
 ): Promise<string[]> {
   const paths: string[] = [];
 
   for (let i = 0; i < frames.length; i++) {
+    onProgress?.({
+      phase: "uploading",
+      current: i + 1,
+      total: frames.length,
+      percent: Math.round(((i + 1) / frames.length) * 100),
+    });
+
     const secs = Math.round(frames[i].timestamp);
     const path = `${userId}/frames/${recordingStem}/frame_${secs}s.jpg`;
     const { error } = await supabase.storage
