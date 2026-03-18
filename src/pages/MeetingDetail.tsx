@@ -255,6 +255,14 @@ export default function MeetingDetail() {
                   onFramesGenerated={() => setFramesVersion((v) => v + 1)}
                 />
               </div>
+
+              {/* Frame gallery */}
+              <div className="mt-3 pt-3 border-t border-border">
+                <FrameGallery
+                  recordingFilename={meeting.recording_filename}
+                  version={framesVersion}
+                />
+              </div>
             </>
           )}
 
