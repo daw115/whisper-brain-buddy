@@ -34,7 +34,7 @@ function formatTime(seconds: number) {
 export default function AppSidebar({ isRecording, recordingTime }: AppSidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, pinUserName, signOut } = useAuth();
 
   return (
     <aside className="w-[280px] min-h-screen border-r border-border bg-sidebar flex flex-col">
@@ -83,9 +83,9 @@ export default function AppSidebar({ isRecording, recordingTime }: AppSidebarPro
         {user && (
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] text-muted-foreground font-mono-data truncate max-w-[180px]">
-              {localStorage.getItem("cerebro_user_name") || user.user_metadata?.display_name || "User"}
+              {pinUserName || user.user_metadata?.display_name || "User"}
             </span>
-            <button onClick={() => { localStorage.removeItem("cerebro_pin"); localStorage.removeItem("cerebro_user_name"); signOut(); }} className="text-muted-foreground hover:text-foreground transition-colors">
+            <button onClick={() => void signOut()} className="text-muted-foreground hover:text-foreground transition-colors">
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>

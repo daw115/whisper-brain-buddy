@@ -11,12 +11,14 @@ export default function PinLoginPage() {
 
   // Auto-login from localStorage
   useEffect(() => {
-    const savedPin = localStorage.getItem("cerebro_pin");
-    if (savedPin && savedPin.length === 4) {
-      handleLogin(savedPin);
-    } else {
-      setAutoLogging(false);
-    }
+    void supabase.auth.signOut().finally(() => {
+      const savedPin = localStorage.getItem("cerebro_pin");
+      if (savedPin && savedPin.length === 4) {
+        handleLogin(savedPin);
+      } else {
+        setAutoLogging(false);
+      }
+    });
   }, []);
 
   const handleLogin = async (pinCode: string) => {
