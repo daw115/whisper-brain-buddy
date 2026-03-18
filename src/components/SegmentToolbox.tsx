@@ -650,6 +650,8 @@ export default function SegmentToolbox({
         return;
       }
 
+      if (ac.signal.aborted) throw new DOMException("Anulowano", "AbortError");
+
       toast.loading(`Dzielenie na ~${totalParts} części…`, { id: "split-video" });
 
       const outputPattern = `splitout_%03d${ext}`;
