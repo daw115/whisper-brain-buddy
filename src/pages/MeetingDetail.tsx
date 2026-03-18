@@ -173,6 +173,16 @@ export default function MeetingDetail() {
             </>
           )}
 
+          {/* AI Analysis */}
+          <div className="mt-6 pt-4 border-t border-border">
+            <h2 className="text-[11px] uppercase text-muted-foreground font-mono-data tracking-wider mb-3">Automatyczna analiza</h2>
+            <AIAnalysisButton
+              meetingId={meeting.id}
+              hasTranscript={!!(meeting.transcript_lines && meeting.transcript_lines.length > 0)}
+              hasFrames={!!meeting.recording_filename}
+            />
+          </div>
+
           {/* Analysis Prompt Generator */}
           <div className="mt-6 pt-4 border-t border-border">
             <AnalysisPromptGenerator meeting={meeting} />
