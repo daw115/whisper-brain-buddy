@@ -35,7 +35,7 @@ serve(async (req) => {
     const { action, old_email, old_password } = await req.json();
 
     // Create old Supabase client
-    const oldSupabase = createClient(OLD_URL, OLD_ANON_KEY);
+    const oldSupabase = createClient(OLD_URL, OLD_SERVICE_KEY);
 
     // If credentials provided, sign in to old project
     let oldUserId: string | null = null;
