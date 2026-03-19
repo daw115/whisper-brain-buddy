@@ -6,9 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Old Supabase project credentials (anon key)
+// Old Supabase project credentials (service_role key for full access)
 const OLD_URL = "https://iusdsamxfdtfokfdmnfm.supabase.co";
-const OLD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1c2RzYW14ZmR0Zm9rZmRtbmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NzIxNzAsImV4cCI6MjA4OTI0ODE3MH0.Snmh7BDuMiQ6iXUUJrpGAA2Xoy0WCfqktB1r5tGM82Y";
+const OLD_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1c2RzYW14ZmR0Zm9rZmRtbmZtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzY3MjE3MCwiZXhwIjoyMDg5MjQ4MTcwfQ.JMz0OAlBpiMOJNaDnFe3wTC-SGZ3gUCpCVN4MkgqoKs";
 
 const NEW_USER_ID = "2afbbd4c-e252-4ebe-80dc-b62461acb311";
 
@@ -35,7 +35,7 @@ serve(async (req) => {
     const { action, old_email, old_password } = await req.json();
 
     // Create old Supabase client
-    const oldSupabase = createClient(OLD_URL, OLD_ANON_KEY);
+    const oldSupabase = createClient(OLD_URL, OLD_SERVICE_KEY);
 
     // If credentials provided, sign in to old project
     let oldUserId: string | null = null;
