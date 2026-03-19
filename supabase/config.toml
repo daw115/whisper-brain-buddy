@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.transcribe-slides]
 verify_jwt = false
+
+[functions.migrate-data]
+verify_jwt = false
